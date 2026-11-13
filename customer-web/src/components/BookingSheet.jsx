@@ -28,10 +28,11 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
   const holdActiveRef = useRef(false);
   const bookingRef = useRef(false);
 
+  const isCafe = shop.category === 'cafe';
   const count = Number(partySize) || 1;
   const chosen = shop.services.filter((s) => serviceIds.includes(s.id));
-  const total = chosen.reduce((a, s) => a + s.price, 0) * count;
-  const duration = chosen.reduce((a, s) => a + s.durationMin, 0) * count;
+  const total = chosen.reduce((a, s) => a + s.price, 0) * (isCafe ? 1 : count);
+  const duration = chosen.reduce((a, s) => a + s.durationMin, 0) * (isCafe ? 1 : count);
   const { acceptQueue, acceptSlots, advanceDays } = shop.settings;
 
   const releaseHold = useCallback(() => {
@@ -81,12 +82,12 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
     setAvail(null);
     setSlot(null);
     try {
-      const res = await api(`/shops/${shop.slug}/availability?date=${date}&serviceIds=${serviceIds.join(',')}&partySize=${count}`);
+      const res = await api(`/shops/${shop.slug}/availability?date=${date}&serviceIds=${serviceIds.join(',')}&partySize=${count}${selectedResource ? `&resourceId=${selectedResource}` : ''}`);
       if (seq === loadSeqRef.current) setAvail(res);
     } catch (e) {
       if (seq === loadSeqRef.current) setError(e.message);
     }
-  }, [shop.slug, date, serviceIds, count]);
+  }, [shop.slug, date, serviceIds, count, selectedResource]);
 
   useEffect(() => {
     if (open && mode === 'slot') loadSlots();
@@ -155,6 +156,31 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
     releaseHold();
     onClose();
   }
+
+  const handlePartyChange = (v) => {
+    if (mode === 'slot') {
+      releaseHold();
+      setSlot(null);
+    }
+    setPartySize(v);
+    const newCount = Number(v) || 1;
+    if (selectedResource && shop.tables?.length) {
+      const curTable = shop.tables.find((t) => t.id === selectedResource);
+      if (curTable && curTable.capacity < newCount) {
+        setSelectedResource(null);
+      }
+    }
+    setError('');
+  };
+
+  const handleResourceChange = (resId) => {
+    if (mode === 'slot') {
+      releaseHold();
+      setSlot(null);
+    }
+    setSelectedResource(resId);
+    setError('');
+  };
 
   async function book() {
     if (bookingRef.current || holding) return;
@@ -231,7 +257,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
             <div style={{ width: shop.category === 'cafe' ? 220 : 150, flex: 'none' }}>
               <Segmented
                 value={partySize}
-                onChange={(v) => { if (mode === 'slot') releaseHold(); setPartySize(v); setError(''); }}
+                onChange={handlePartyChange}
                 options={shop.category === 'cafe'
                   ? [{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '4', label: '4' }, { value: '5', label: '5+' }]
                   : [{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }]}
@@ -272,7 +298,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
               <button
                 type="button"
                 className={cx('chip', !selectedResource && 'on')}
-                onClick={() => { setSelectedResource(null); setError(''); }}
+                onClick={() => handleResourceChange(null)}
               >
                 ⚡ Anyone (First Available)
               </button>
@@ -281,7 +307,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
                   type="button"
                   key={st.id}
                   className={cx('chip', selectedResource === st.id && 'on')}
-                  onClick={() => { setSelectedResource(st.id); setError(''); }}
+                  onClick={() => handleResourceChange(st.id)}
                 >
                   {st.name}
                 </button>
@@ -307,7 +333,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
                   <button
                     type="button"
                     className={cx('chip', !selectedResource && 'on')}
-                    onClick={() => { setSelectedResource(null); setError(''); }}
+                    onClick={() => handleResourceChange(null)}
                   >
                     🍽️ Any Table (First Available)
                   </button>
@@ -316,7 +342,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
                       type="button"
                       key={t.id}
                       className={cx('chip', selectedResource === t.id && 'on')}
-                      onClick={() => { setSelectedResource(t.id); setError(''); }}
+                      onClick={() => handleResourceChange(t.id)}
                     >
                       {t.name} ({t.capacity} seats)
                     </button>

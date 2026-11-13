@@ -9,6 +9,7 @@ const slotHoldSchema = new Schema(
     date: { type: String, required: true },
     slotStart: { type: Number, required: true },
     durationMin: { type: Number, required: true },
+    resourceId: { type: Schema.Types.ObjectId, default: null },
     expiresAt: { type: Date, required: true, expires: 0 },
   },
   { timestamps: true }

@@ -149,10 +149,19 @@ export async function notifyQueueTurnUpdates(shop, date) {
 
   // Compute true queue position among ALL waiting bookings (even those without push)
   const allWaiting = await Booking.find({ shop: shop._id, date, type: 'queue', status: 'waiting' })
-    .select('_id token queueOrder')
+    .select('_id token queueOrder resourceId')
     .lean();
   allWaiting.sort((a, b) => (a.queueOrder ?? a.token * 100) - (b.queueOrder ?? b.token * 100) || a.token - b.token);
-  const rankMap = new Map(allWaiting.map((w, idx) => [String(w._id), idx]));
+
+  const getAheadCount = (booking) => {
+    if (booking.resourceId) {
+      const rel = allWaiting.filter((w) => !w.resourceId || String(w.resourceId) === String(booking.resourceId));
+      const idx = rel.findIndex((w) => String(w._id) === String(booking._id));
+      return idx >= 0 ? idx : null;
+    }
+    const idx = allWaiting.findIndex((w) => String(w._id) === String(booking._id));
+    return idx >= 0 ? idx : null;
+  };
 
   const baseUrl = env.CUSTOMER_APP_URL ? env.CUSTOMER_APP_URL.replace(/\/$/, '') : '';
 
@@ -172,7 +181,7 @@ export async function notifyQueueTurnUpdates(shop, date) {
         });
       }
     } else if (b.status === 'waiting' && !b.notifiedNext) {
-      const ahead = rankMap.get(String(b._id));
+      const ahead = getAheadCount(b);
       if (ahead != null && ahead <= 1) {
         const claimed = await Booking.findOneAndUpdate(
           { _id: b._id, notifiedNext: false },

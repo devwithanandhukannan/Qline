@@ -223,6 +223,36 @@ r.post('/bookings/:id/action', withShop, validate({ params: idParam, body: D.act
       const cap = capacityOn(req.shop, b.date);
       const serving = await Booking.countDocuments({ shop: req.shop._id, date: b.date, status: 'serving' });
       if (serving >= cap) throw conflict(cap === 1 ? 'Finish the current customer first.' : 'All chairs are busy. Finish a customer first.');
+
+      const targetResId = req.valid.body.resourceId || b.resourceId;
+      if (targetResId) {
+        const busy = await Booking.exists({
+          shop: req.shop._id,
+          date: b.date,
+          resourceId: targetResId,
+          status: 'serving',
+          _id: { $ne: b._id },
+        });
+        if (busy) {
+          throw conflict('This stylist or table is already serving a customer. Finish that customer first.');
+        }
+        if (req.valid.body.resourceId && String(req.valid.body.resourceId) !== String(b.resourceId)) {
+          const st = (req.shop.staff || []).find((x) => String(x._id) === String(targetResId) && x.active);
+          if (st) {
+            b.resourceId = st._id;
+            b.resourceName = st.name;
+            b.resourceType = 'staff';
+          } else {
+            const tb = (req.shop.tables || []).find((x) => String(x._id) === String(targetResId) && x.active);
+            if (tb) {
+              b.resourceId = tb._id;
+              b.resourceName = tb.name;
+              b.resourceType = 'table';
+            }
+          }
+        }
+      }
+
       b.status = 'serving';
       b.startedAt = new Date();
     } else if (action === 'done') {

@@ -35,7 +35,10 @@ export function queueDecision(shop, todays, durationMin, now, resourceId = null)
   }
   if (!settings.acceptQueue) return { ok: false, reason: 'This shop is not taking queue entries. Please book a slot.', ...est };
   if (settings.queuePaused) return { ok: false, reason: 'The queue is paused by the shop for a moment.', ...est };
-  if (est.ahead >= settings.maxQueue) return { ok: false, reason: 'The queue is full for today.', ...est };
+  const totalLive = todays.filter((b) => b.type === 'queue' && ['waiting', 'serving'].includes(b.status)).length;
+  if (totalLive >= settings.maxQueue || est.ahead >= settings.maxQueue) {
+    return { ok: false, reason: 'The queue is full for today.', ...est };
+  }
   if (now.minutes + est.waitMin + durationMin > est.status.closesAt) {
     return { ok: false, reason: 'The queue has reached closing time for today. Try a slot on another day.', ...est };
   }

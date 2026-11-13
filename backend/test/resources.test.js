@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { estimateQueue, positionOf, queueDecision } from '../src/services/queue.js';
-import { capacityOn } from '../src/services/schedule.js';
+import { capacityOn, buildSlots, canTakeSlot } from '../src/services/schedule.js';
 import { tableDto, tablesDto, settingsDto } from '../src/validators/shop.js';
 import { createBookingDto } from '../src/validators/booking.js';
 
@@ -15,6 +15,62 @@ test('capacityOn uses active tables count for cafes', () => {
     ],
   };
   assert.equal(capacityOn(cafeShop, '2026-11-14'), 2);
+});
+
+test('buildSlots filters by partySize capacity for cafes', () => {
+  const cafeShop = {
+    timezone: 'Asia/Kolkata',
+    category: 'cafe',
+    settings: { slotIntervalMin: 60, advanceDays: 7 },
+    weekly: [{ day: 6, open: true, intervals: [{ start: '10:00', end: '14:00' }] }],
+    tables: [
+      { _id: 't1', name: 'Table 1', capacity: 2, active: true },
+      { _id: 't2', name: 'Table 2', capacity: 4, active: true },
+    ],
+  };
+  const now = { date: '2026-11-14', minutes: 540 }; // 9:00 AM
+
+  // Party of 4: only Table 2 (capacity 4) is eligible (cap = 1)
+  const slots4 = buildSlots(cafeShop, '2026-11-14', [], 60, now, [], null, 4);
+  assert.equal(slots4.capacity, 1);
+  assert.equal(slots4.slots[0].free, true);
+
+  // Party of 8: no table can accommodate 8
+  const slots8 = buildSlots(cafeShop, '2026-11-14', [], 60, now, [], null, 8);
+  assert.equal(slots8.open, false);
+});
+
+test('buildSlots isolates specific resourceId availability', () => {
+  const rahulId = '64b1f1f1f1f1f1f1f1f1f101';
+  const anoopId = '64b1f1f1f1f1f1f1f1f1f102';
+  const shop = {
+    timezone: 'Asia/Kolkata',
+    category: 'barber',
+    settings: { slotIntervalMin: 30, advanceDays: 7 },
+    weekly: [{ day: 6, open: true, intervals: [{ start: '10:00', end: '12:00' }] }],
+    staff: [
+      { _id: rahulId, name: 'Rahul', active: true },
+      { _id: anoopId, name: 'Anoop', active: true },
+    ],
+  };
+  const now = { date: '2026-11-14', minutes: 540 }; // 9:00 AM
+
+  // Rahul is booked at 10:00 (600)
+  const bookings = [
+    { type: 'slot', status: 'waiting', slotStart: 600, durationMin: 30, resourceId: rahulId },
+  ];
+
+  // Anyone: slot at 10:00 is free because Anoop is free (capacity = 2, taken = 1)
+  const anyoneSlots = buildSlots(shop, '2026-11-14', bookings, 30, now, [], null, 1);
+  assert.equal(anyoneSlots.slots.find((s) => s.start === 600).free, true);
+
+  // Rahul specifically: slot at 10:00 is NOT free because Rahul is busy
+  const rahulSlots = buildSlots(shop, '2026-11-14', bookings, 30, now, [], rahulId, 1);
+  assert.equal(rahulSlots.slots.find((s) => s.start === 600).free, false);
+
+  // Anoop specifically: slot at 10:00 IS free
+  const anoopSlots = buildSlots(shop, '2026-11-14', bookings, 30, now, [], anoopId, 1);
+  assert.equal(anoopSlots.slots.find((s) => s.start === 600).free, true);
 });
 
 test('estimateQueue with specific resource calculates wait time for that resource', () => {
@@ -93,3 +149,4 @@ test('validators accept tableDto, tablesDto, allowStaffSelection, allowTableSele
   assert.equal(validBooking.partySize, 4);
   assert.equal(validBooking.resourceId, '64b1f1f1f1f1f1f1f1f1f102');
 });
+

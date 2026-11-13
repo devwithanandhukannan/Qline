@@ -117,7 +117,12 @@ export const overrideParam = z.object({ date: dateStr }).strict();
 export const pauseDto = z.object({ paused: z.boolean() }).strict();
 export const delayDto = z.object({ delayMin: z.number().int().min(0).max(240), note: text(140).default('') }).strict();
 
-export const actionDto = z.object({ action: z.enum(['start', 'done', 'no_show', 'cancel']) }).strict();
+export const actionDto = z
+  .object({
+    action: z.enum(['start', 'done', 'no_show', 'cancel']),
+    resourceId: objectId.optional(),
+  })
+  .strict();
 export const walkinDto = z
   .object({
     name: text(80).optional().default('Anonymous').transform((val) => (val && val.trim() ? val.trim() : 'Anonymous')),

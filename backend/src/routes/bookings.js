@@ -23,14 +23,15 @@ const HOLD_MS = 2 * 60 * 1000;
 
 /** Reserve a time slot for 2 minutes while the customer completes booking. */
 r.post('/hold-slot', validate({ body: holdSlotDto }), async (req, res) => {
-  const { slug, date, slotStart, serviceIds, partySize } = req.valid.body;
+  const { slug, date, slotStart, serviceIds, partySize, resourceId } = req.valid.body;
   const shop = await Shop.findOne({ slug, isActive: { $ne: false } }).lean();
   if (!shop) throw new AppError(404, 'Shop not found', 'not_found');
   if (!shop.settings.acceptSlots) throw new AppError(409, 'This shop does not take slot bookings.', 'slots_unavailable');
 
   const picked = serviceIds.map((id) => shop.services.find((s) => String(s._id) === id && s.active)).filter(Boolean);
   if (picked.length !== serviceIds.length) throw new AppError(400, 'One or more selected services are unavailable', 'bad_service');
-  const durationMin = picked.reduce((a, s) => a + s.durationMin, 0) * partySize;
+  const durationMultiplier = shop.category === 'cafe' ? 1 : partySize;
+  const durationMin = picked.reduce((a, s) => a + s.durationMin, 0) * durationMultiplier;
 
   const now = nowInZone(shop.timezone);
   const nowDate = new Date();
@@ -39,14 +40,14 @@ r.post('/hold-slot', validate({ body: holdSlotDto }), async (req, res) => {
   const hold = await withDistributedLock([`cust:${req.user._id}`, `shop:${shop._id}:${date}`], async () => {
     const [dayBookings, activeHolds] = await Promise.all([
       Booking.find({ shop: shop._id, date, type: 'slot', status: { $in: ['waiting', 'serving', 'done'] } })
-        .select('type status durationMin slotStart')
+        .select('type status durationMin slotStart resourceId')
         .lean(),
       SlotHold.find({ shop: shop._id, date, expiresAt: { $gt: nowDate } })
-        .select('customer slotStart durationMin')
+        .select('customer slotStart durationMin resourceId')
         .lean(),
     ]);
 
-    if (!canTakeSlot(shop, date, slotStart, durationMin, dayBookings, now, activeHolds, req.user._id)) {
+    if (!canTakeSlot(shop, date, slotStart, durationMin, dayBookings, now, activeHolds, req.user._id, resourceId, partySize)) {
       throw new AppError(409, 'That time was just taken. Please pick another slot.', 'slot_taken');
     }
 
@@ -57,6 +58,7 @@ r.post('/hold-slot', validate({ body: holdSlotDto }), async (req, res) => {
       date,
       slotStart,
       durationMin,
+      resourceId: resourceId || null,
       expiresAt,
     });
   });
@@ -99,7 +101,8 @@ r.post('/', validate({ body: createBookingDto }), async (req, res) => {
 
   const chosen = shop.services.filter((s) => s.active && serviceIds.includes(String(s._id)));
   if (chosen.length !== new Set(serviceIds).size) throw badRequest('One of the services is not available', 'bad_service');
-  const durationMin = chosen.reduce((a, s) => a + s.durationMin, 0) * partySize;
+  const durationMultiplier = shop.category === 'cafe' ? 1 : partySize;
+  const durationMin = chosen.reduce((a, s) => a + s.durationMin, 0) * durationMultiplier;
 
   let resourceName = '';
   let resourceType = null;
@@ -147,9 +150,9 @@ r.post('/', validate({ body: createBookingDto }), async (req, res) => {
     } else {
       if (!shop.settings.acceptSlots) throw new AppError(409, 'This shop does not take slot bookings.', 'slots_unavailable');
       const activeHolds = await SlotHold.find({ shop: shop._id, date, expiresAt: { $gt: new Date() } })
-        .select('customer slotStart durationMin')
+        .select('customer slotStart durationMin resourceId')
         .lean();
-      if (!canTakeSlot(shop, date, slotStart, durationMin, dayBookings, now, activeHolds, req.user._id)) {
+      if (!canTakeSlot(shop, date, slotStart, durationMin, dayBookings, now, activeHolds, req.user._id, resourceId, partySize)) {
         throw new AppError(409, 'That time was just taken or your reservation expired. Please pick another slot.', 'slot_taken');
       }
       await SlotHold.deleteMany({ customer: req.user._id, shop: shop._id });
@@ -169,7 +172,12 @@ r.post('/', validate({ body: createBookingDto }), async (req, res) => {
       resourceName,
       resourceType,
       slotStart: type === 'slot' ? slotStart : undefined,
-      services: chosen.map((s) => ({ serviceId: s._id, name: s.name, durationMin: s.durationMin * partySize, price: s.price * partySize })),
+      services: chosen.map((s) => ({
+        serviceId: s._id,
+        name: s.name,
+        durationMin: s.durationMin * durationMultiplier,
+        price: s.price * (shop.category === 'cafe' ? 1 : partySize),
+      })),
       durationMin,
     });
   });
@@ -245,7 +253,7 @@ r.post('/:id/cancel', validate({ params: idParam }), async (req, res) => {
 });
 
 r.post('/:id/step-back', validate({ params: idParam }), async (req, res) => {
-  const target = await Booking.findById(req.valid.params.id).select('shop date customer type').lean();
+  const target = await Booking.findById(req.valid.params.id).select('shop date customer type resourceId').lean();
   if (!target || String(target.customer) !== String(req.user._id)) throw notFound('Booking not found');
   if (target.type !== 'queue') throw badRequest('Only live queue bookings can step back.');
 
@@ -257,11 +265,15 @@ r.post('/:id/step-back', validate({ params: idParam }), async (req, res) => {
     const orderOf = (x) => x.queueOrder ?? x.token * 100;
     waiting.sort((a, b) => orderOf(a) - orderOf(b) || a.token - b.token);
 
-    const idx = waiting.findIndex((w) => String(w._id) === String(target._id));
-    if (idx < 0) throw conflict('This booking can no longer step back.');
-    const me = waiting[idx];
+    const relWaiting = target.resourceId
+      ? waiting.filter((w) => !w.resourceId || String(w.resourceId) === String(target.resourceId))
+      : waiting;
+
+    const relIdx = relWaiting.findIndex((w) => String(w._id) === String(target._id));
+    if (relIdx < 0) throw conflict('This booking can no longer step back.');
+    const me = relWaiting[relIdx];
     if ((me.steppedBackCount || 0) >= 2) throw conflict('You can step back at most twice per booking.');
-    const next = waiting[idx + 1];
+    const next = relWaiting[relIdx + 1];
     if (!next) throw conflict('Nobody is waiting behind you right now.');
 
     const myOrder = orderOf(me);
@@ -270,7 +282,7 @@ r.post('/:id/step-back', validate({ params: idParam }), async (req, res) => {
     me.queueOrder = nextOrder > myOrder ? nextOrder : myOrder + 100;
     me.steppedBackCount = (me.steppedBackCount || 0) + 1;
     // Only reset next-turn notification if moving behind the first 2 waiting spots.
-    if (idx + 1 > 1) me.notifiedNext = false;
+    if (relIdx + 1 > 1) me.notifiedNext = false;
 
     await Promise.all([next.save(), me.save()]);
   });

@@ -11,8 +11,9 @@ import { mins, time12 } from '@/lib/format';
 
 const STATUS_TEXT = { waiting: 'Waiting', serving: 'In the chair', done: 'Done', no_show: 'No-show', cancelled: 'Cancelled' };
 
-function Row({ b, onAction, busy }) {
+function Row({ b, onAction, busy, busyResourceIds }) {
   const live = b.status === 'waiting' || b.status === 'serving';
+  const resBusy = b.status === 'waiting' && b.resourceId && busyResourceIds?.has(String(b.resourceId));
   return (
     <div className={cx('qrow', b.status === 'serving' && 'serving')}>
       <div className={cx('token', !live && 'soft')}>{b.token}</div>
@@ -20,7 +21,12 @@ function Row({ b, onAction, busy }) {
         <div className="row wrap" style={{ gap: 8 }}>
           <b style={{ fontSize: 17 }}>{b.name}</b>
           {b.partySize > 1 && <span className="tag">{b.partySize} people</span>}
-          {b.resourceName && <span className="tag">{b.resourceType === 'table' ? `🍽️ ${b.resourceName}` : `✂️ ${b.resourceName}`}</span>}
+          {b.resourceName && (
+            <span className={cx('tag', resBusy && 'warn')}>
+              {b.resourceType === 'table' ? `🍽️ ${b.resourceName}` : `✂️ ${b.resourceName}`}
+              {resBusy ? ' (In chair)' : ''}
+            </span>
+          )}
           {b.steppedBackCount > 0 && <span className="tag">Stepped back</span>}
           {b.isWalkin && <span className="tag">Walk-in</span>}
           {b.type === 'slot' && b.slotTime && <span className="tag">Slot {time12(b.slotTime)}</span>}
@@ -140,6 +146,9 @@ function Dashboard() {
   }
 
   const { status, settings, summary, bookings } = data;
+  const busyResourceIds = new Set(
+    bookings.filter((b) => b.status === 'serving' && b.resourceId).map((b) => String(b.resourceId))
+  );
   const orderOf = (x) => x.queueOrder ?? x.token * 100;
   const live = bookings
     .filter((b) => b.status === 'serving' || b.status === 'waiting')
@@ -211,7 +220,7 @@ function Dashboard() {
           </div>
         ) : (
           <div className="list">
-            {live.map((b) => <Row key={b.id} b={b} onAction={act} busy={busy} />)}
+            {live.map((b) => <Row key={b.id} b={b} onAction={act} busy={busy} busyResourceIds={busyResourceIds} />)}
           </div>
         )}
       </section>
@@ -219,7 +228,7 @@ function Dashboard() {
       {past.length > 0 && (
         <section className="stack-sm">
           <div className="section-title">Finished · {past.length}</div>
-          <div className="list">{past.map((b) => <Row key={b.id} b={b} onAction={act} busy={busy} />)}</div>
+          <div className="list">{past.map((b) => <Row key={b.id} b={b} onAction={act} busy={busy} busyResourceIds={busyResourceIds} />)}</div>
         </section>
       )}
 

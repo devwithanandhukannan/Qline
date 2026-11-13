@@ -75,18 +75,43 @@ export function peakConcurrent(bookings, start, durationMin) {
 }
 
 // Bookable time slots for a date given existing slot bookings and active temporary holds.
-export function buildSlots(shop, dateStr, bookings, durationMin, now = nowInZone(shop.timezone), activeHolds = []) {
+export function buildSlots(
+  shop,
+  dateStr,
+  bookings,
+  durationMin,
+  now = nowInZone(shop.timezone),
+  activeHolds = [],
+  resourceId = null,
+  partySize = 1
+) {
   const { slotIntervalMin, advanceDays } = shop.settings;
   const diff = daysBetween(now.date, dateStr);
   if (diff < 0 || diff > advanceDays) return { open: false, slots: [], reason: 'Date is outside the booking window' };
   const day = resolveDay(shop, dateStr);
-  const cap = capacityOn(shop, dateStr);
+  let cap = capacityOn(shop, dateStr);
+
+  if (resourceId) {
+    cap = 1;
+  } else if ((shop.category === 'cafe' || shop.settings?.allowTableSelection) && (shop.tables || []).length > 0) {
+    const eligibleTables = shop.tables.filter((t) => t.active && t.capacity >= partySize);
+    if (eligibleTables.length === 0) {
+      return { open: false, slots: [], reason: `No tables available that can seat ${partySize} people.` };
+    }
+    cap = eligibleTables.length;
+  }
+
   if (!day.open || cap === 0) return { open: false, slots: [], reason: day.note || 'Closed on this day' };
 
-  const active = [
+  let active = [
     ...bookings.filter((b) => b.type === 'slot' && ['waiting', 'serving', 'done'].includes(b.status)),
     ...activeHolds,
   ];
+
+  if (resourceId) {
+    active = active.filter((b) => !b.resourceId || String(b.resourceId) === String(resourceId));
+  }
+
   const slots = [];
   for (const iv of day.intervals) {
     for (let t = iv.start; t + durationMin <= iv.end; t += slotIntervalMin) {
@@ -98,11 +123,22 @@ export function buildSlots(shop, dateStr, bookings, durationMin, now = nowInZone
   return { open: true, slots, capacity: cap, note: day.note };
 }
 
-export function canTakeSlot(shop, dateStr, start, durationMin, bookings, now, activeHolds = [], currentCustomerId = null) {
+export function canTakeSlot(
+  shop,
+  dateStr,
+  start,
+  durationMin,
+  bookings,
+  now,
+  activeHolds = [],
+  currentCustomerId = null,
+  resourceId = null,
+  partySize = 1
+) {
   const holds = currentCustomerId
     ? activeHolds.filter((h) => String(h.customer) !== String(currentCustomerId))
     : activeHolds;
-  const r = buildSlots(shop, dateStr, bookings, durationMin, now, holds);
+  const r = buildSlots(shop, dateStr, bookings, durationMin, now, holds, resourceId, partySize);
   const s = r.slots.find((x) => x.start === start);
   return !!s && s.free;
 }

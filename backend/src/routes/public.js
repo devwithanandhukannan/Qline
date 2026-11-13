@@ -63,19 +63,19 @@ r.get('/push/vapid-key', async (_req, res) => {
 r.get('/shops/:slug/availability', validate({ params: slugParam, query: availabilityQuery }), async (req, res) => {
   const shop = await Shop.findOne({ slug: req.valid.params.slug }).lean();
   if (!shop || shop.isActive === false) throw notFound('This shop is currently unavailable');
-  const { date, serviceIds, partySize } = req.valid.query;
+  const { date, serviceIds, partySize, resourceId } = req.valid.query;
   const ids = serviceIds ? serviceIds.split(',') : [];
   const chosen = ids.length ? shop.services.filter((s) => s.active && ids.includes(String(s._id))) : [];
   const baseDuration = chosen.length ? chosen.reduce((a, s) => a + s.durationMin, 0) : Math.min(...shop.services.filter((s) => s.active).map((s) => s.durationMin), 30);
-  const duration = baseDuration * (partySize || 1);
+  const duration = baseDuration * (shop.category === 'cafe' ? 1 : (partySize || 1));
   const bookings = await Booking.find({ shop: shop._id, date, type: 'slot', status: { $in: ['waiting', 'serving', 'done'] } })
-    .select('type status slotStart durationMin')
+    .select('type status slotStart durationMin resourceId')
     .lean();
   const holds = await SlotHold.find({ shop: shop._id, date, expiresAt: { $gt: new Date() } })
-    .select('slotStart durationMin')
+    .select('slotStart durationMin resourceId')
     .lean();
   const now = nowInZone(shop.timezone);
-  res.json({ date, durationMin: duration, ...buildSlots(shop, date, bookings, duration, now, holds) });
+  res.json({ date, durationMin: duration, ...buildSlots(shop, date, bookings, duration, now, holds, resourceId, partySize) });
 });
 
 r.get('/shops/:slug/tv', validate({ params: slugParam }), async (req, res) => {
