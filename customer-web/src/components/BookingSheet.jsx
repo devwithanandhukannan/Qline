@@ -14,6 +14,8 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
   const [avail, setAvail] = useState(null);
   const [slot, setSlot] = useState(null);
   const [partySize, setPartySize] = useState('1');
+  const [selectedResource, setSelectedResource] = useState(null);
+  const [resQueue, setResQueue] = useState(null);
   const [forOther, setForOther] = useState(false);
   const [forName, setForName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -46,6 +48,8 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
     if (open) {
       setMode(initialMode);
       setPartySize('1');
+      setSelectedResource(null);
+      setResQueue(null);
       setForOther(false);
       setForName('');
       setError('');
@@ -55,6 +59,22 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
       holdActiveRef.current = false;
     }
   }, [open, initialMode]);
+
+  useEffect(() => {
+    if (!open || mode !== 'queue' || !selectedResource) {
+      setResQueue(null);
+      return;
+    }
+    let active = true;
+    api(`/shops/${shop.slug}?resourceId=${selectedResource}`)
+      .then((res) => {
+        if (active && res.shop?.queue) setResQueue(res.shop.queue);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [open, mode, selectedResource, shop.slug]);
 
   const loadSlots = useCallback(async () => {
     const seq = ++loadSeqRef.current;
@@ -110,7 +130,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
     try {
       const r = await api('/bookings/hold-slot', {
         method: 'POST',
-        body: { slug: shop.slug, date, slotStart: s.start, serviceIds, partySize: count },
+        body: { slug: shop.slug, date, slotStart: s.start, serviceIds, partySize: count, ...(selectedResource ? { resourceId: selectedResource } : {}) },
       });
       if (reqId !== holdReqRef.current) return;
       const until = Date.parse(r.hold.expiresAt) || Date.now() + (r.hold.ttlSec || 120) * 1000;
@@ -151,6 +171,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
         type: mode,
         serviceIds,
         partySize: count,
+        ...(selectedResource ? { resourceId: selectedResource } : {}),
         ...(forOther && forName.trim() ? { forName: forName.trim() } : {}),
         ...(mode === 'slot' ? { date, slotStart: slot } : {}),
       };
@@ -207,11 +228,13 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
               <b style={{ fontSize: 14 }}>People</b>
               <div className="small muted">Book together for family or friends</div>
             </div>
-            <div style={{ width: 150, flex: 'none' }}>
+            <div style={{ width: shop.category === 'cafe' ? 220 : 150, flex: 'none' }}>
               <Segmented
                 value={partySize}
                 onChange={(v) => { if (mode === 'slot') releaseHold(); setPartySize(v); setError(''); }}
-                options={[{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }]}
+                options={shop.category === 'cafe'
+                  ? [{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '4', label: '4' }, { value: '5', label: '5+' }]
+                  : [{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }]}
               />
             </div>
           </div>
@@ -237,22 +260,98 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
           )}
         </div>
 
-        {mode === 'queue' && (
-          <div className="card center stack-sm">
-            {shop.today.state !== 'open' ? (
-              <p className="muted">{shop.today.state === 'later' ? `The shop opens at ${time12(shop.today.opensAt)}. You can join the queue once it opens.` : 'The shop is closed right now.'}</p>
-            ) : (
-              <>
-                <p className="small muted">Estimated wait if you join now</p>
-                <div style={{ fontSize: 40, fontWeight: 700, letterSpacing: '-0.03em' }} className="num">
-                  {shop.queue ? (shop.queue.ahead === 0 ? 'No wait' : `~${mins(shop.queue.waitMin)}`) : '-'}
-                </div>
-                {shop.queue && shop.queue.ahead > 0 && <p className="small muted">{shop.queue.ahead} {shop.queue.ahead === 1 ? 'person is' : 'people are'} ahead of you</p>}
-                {shop.queue?.delayNote && <p className="small">{shop.queue.delayNote}</p>}
-              </>
-            )}
+        {shop.settings?.allowStaffSelection && (shop.staff || []).length > 0 && (
+          <div className="card stack-sm" style={{ padding: '12px 14px' }}>
+            <div className="row between" style={{ gap: 8 }}>
+              <div>
+                <b style={{ fontSize: 14 }}>Choose Stylist</b>
+                <div className="small muted">Anyone / First Available gets you served the fastest</div>
+              </div>
+            </div>
+            <div className="row wrap" style={{ gap: 8, marginTop: 4 }}>
+              <button
+                type="button"
+                className={cx('chip', !selectedResource && 'on')}
+                onClick={() => { setSelectedResource(null); setError(''); }}
+              >
+                ⚡ Anyone (First Available)
+              </button>
+              {shop.staff.map((st) => (
+                <button
+                  type="button"
+                  key={st.id}
+                  className={cx('chip', selectedResource === st.id && 'on')}
+                  onClick={() => { setSelectedResource(st.id); setError(''); }}
+                >
+                  {st.name}
+                </button>
+              ))}
+            </div>
           </div>
         )}
+
+        {shop.settings?.allowTableSelection && (shop.tables || []).length > 0 && (() => {
+          const matching = (shop.tables || []).filter((t) => t.active && t.capacity >= count);
+          return (
+            <div className="card stack-sm" style={{ padding: '12px 14px' }}>
+              <div className="row between" style={{ gap: 8 }}>
+                <div>
+                  <b style={{ fontSize: 14 }}>Choose Table</b>
+                  <div className="small muted">
+                    {matching.length > 0 ? 'Pick an available table or first available' : `No tables for ${count} people`}
+                  </div>
+                </div>
+              </div>
+              {matching.length > 0 ? (
+                <div className="row wrap" style={{ gap: 8, marginTop: 4 }}>
+                  <button
+                    type="button"
+                    className={cx('chip', !selectedResource && 'on')}
+                    onClick={() => { setSelectedResource(null); setError(''); }}
+                  >
+                    🍽️ Any Table (First Available)
+                  </button>
+                  {matching.map((t) => (
+                    <button
+                      type="button"
+                      key={t.id}
+                      className={cx('chip', selectedResource === t.id && 'on')}
+                      onClick={() => { setSelectedResource(t.id); setError(''); }}
+                    >
+                      {t.name} ({t.capacity} seats)
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="small err-text" style={{ margin: 0 }}>
+                  No tables with {count}+ seats available. Please split into smaller groups or choose Any Table.
+                </p>
+              )}
+            </div>
+          );
+        })()}
+
+        {mode === 'queue' && (() => {
+          const q = resQueue || shop.queue;
+          return (
+            <div className="card center stack-sm">
+              {shop.today.state !== 'open' ? (
+                <p className="muted">{shop.today.state === 'later' ? `The shop opens at ${time12(shop.today.opensAt)}. You can join the queue once it opens.` : 'The shop is closed right now.'}</p>
+              ) : (
+                <>
+                  <p className="small muted">
+                    {selectedResource ? 'Estimated wait for chosen stylist/table' : 'Estimated wait if you join now'}
+                  </p>
+                  <div style={{ fontSize: 40, fontWeight: 700, letterSpacing: '-0.03em' }} className="num">
+                    {q ? (q.ahead === 0 ? 'No wait' : `~${mins(q.waitMin)}`) : '-'}
+                  </div>
+                  {q && q.ahead > 0 && <p className="small muted">{q.ahead} {q.ahead === 1 ? 'person is' : 'people are'} ahead of you</p>}
+                  {q?.delayNote && <p className="small">{q.delayNote}</p>}
+                </>
+              )}
+            </div>
+          );
+        })()}
 
         {mode === 'slot' && (
           <div className="stack">

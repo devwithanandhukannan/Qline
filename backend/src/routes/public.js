@@ -51,7 +51,8 @@ r.get('/shops', validate({ query: searchQuery }), async (req, res) => {
 r.get('/shops/:slug', validate({ params: slugParam }), async (req, res) => {
   const shop = await Shop.findOne({ slug: req.valid.params.slug }).lean();
   if (!shop || shop.isActive === false) throw notFound('This shop is currently unavailable');
-  res.json({ shop: await presentShop(shop) });
+  const resourceId = req.query.resourceId || null;
+  res.json({ shop: await presentShop(shop, { resourceId }) });
 });
 
 r.get('/push/vapid-key', async (_req, res) => {

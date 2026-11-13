@@ -31,6 +31,12 @@ const staffSchema = new mongoose.Schema({
   offDates: { type: [String], default: [] },
 });
 
+const tableSchema = new mongoose.Schema({
+  name: { type: String, required: true, maxlength: 60 },
+  capacity: { type: Number, required: true, min: 1, max: 50, default: 2 },
+  active: { type: Boolean, default: true },
+});
+
 const serviceSchema = new mongoose.Schema({
   name: { type: String, required: true, maxlength: 60 },
   durationMin: { type: Number, required: true, min: 5, max: 480 },
@@ -62,6 +68,7 @@ const shopSchema = new mongoose.Schema(
     images: { type: [String], default: [] },
     services: { type: [serviceSchema], default: [] },
     staff: { type: [staffSchema], default: [] },
+    tables: { type: [tableSchema], default: [] },
     weekly: { type: [weeklySchema], default: defaultWeekly },
     overrides: { type: [overrideSchema], default: [] },
     settings: {
@@ -75,6 +82,8 @@ const shopSchema = new mongoose.Schema(
       delayMin: { type: Number, default: 0, min: 0, max: 240 },
       delayNote: { type: String, maxlength: 140, default: '' },
       enableTvScreen: { type: Boolean, default: false },
+      allowStaffSelection: { type: Boolean, default: false },
+      allowTableSelection: { type: Boolean, default: false },
     },
     ratingAvg: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 },

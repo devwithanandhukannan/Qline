@@ -20,8 +20,11 @@ const bookingSchema = new mongoose.Schema(
       },
     ],
     durationMin: { type: Number, required: true },
-    partySize: { type: Number, min: 1, max: 3, default: 1 },
+    partySize: { type: Number, min: 1, max: 50, default: 1 },
     forName: { type: String, trim: true, maxlength: 80, default: '' },
+    resourceId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    resourceName: { type: String, maxlength: 80, default: '' },
+    resourceType: { type: String, enum: ['staff', 'table', 'other', null], default: null },
     queueOrder: { type: Number, default: null },
     steppedBackCount: { type: Number, min: 0, default: 0 },
     pushSubscriptions: {
@@ -52,6 +55,7 @@ const bookingSchema = new mongoose.Schema(
 );
 
 bookingSchema.index({ shop: 1, date: 1, status: 1 });
+bookingSchema.index({ shop: 1, date: 1, resourceId: 1, status: 1 });
 bookingSchema.index({ customer: 1, createdAt: -1 });
 bookingSchema.index({ date: 1, status: 1 });
 bookingSchema.index({ createdAt: -1 });

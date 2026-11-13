@@ -283,6 +283,7 @@ export default function TicketCard({ booking }) {
           <span>{dayLabel(b.date)}</span>
           {b.slotTime && <span>· {time12(b.slotTime)}</span>}
           {b.partySize > 1 && <span>· {b.partySize} people</span>}
+          {b.resourceName && <span>· {b.resourceName}</span>}
           {b.forName && <span>· For {b.forName}</span>}
         </div>
 

@@ -8,8 +8,9 @@ export const createBookingDto = z
     serviceIds: z.array(objectId).min(1).max(6),
     date: dateStr.optional(),
     slotStart: z.number().int().min(0).max(1439).optional(),
-    partySize: z.number().int().min(1).max(3).default(1),
+    partySize: z.number().int().min(1).max(50).default(1),
     forName: z.string().trim().max(80).default(''),
+    resourceId: objectId.nullable().optional(),
   })
   .strict()
   .refine((b) => b.type === 'queue' || (b.date && b.slotStart !== undefined), {
@@ -64,7 +65,8 @@ export const availabilityQuery = z
       .string()
       .regex(/^[a-f\d]{24}(,[a-f\d]{24}){0,5}$/i)
       .optional(),
-    partySize: z.coerce.number().int().min(1).max(3).default(1),
+    partySize: z.coerce.number().int().min(1).max(50).default(1),
+    resourceId: objectId.optional(),
   })
   .strict();
 
@@ -74,7 +76,8 @@ export const holdSlotDto = z
     date: dateStr,
     slotStart: z.number().int().min(0).max(1439),
     serviceIds: z.array(objectId).min(1).max(6),
-    partySize: z.number().int().min(1).max(3).default(1),
+    partySize: z.number().int().min(1).max(50).default(1),
+    resourceId: objectId.nullable().optional(),
   })
   .strict();
 

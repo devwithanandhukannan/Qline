@@ -19,8 +19,12 @@ export function resolveDay(shop, dateStr) {
   return { open: intervals.length > 0, intervals, note: '', source: 'weekly' };
 }
 
-// How many chairs/barbers are working on a date. No staff configured = 1.
+// How many chairs/barbers/tables are working on a date. No staff/tables configured = 1.
 export function capacityOn(shop, dateStr) {
+  if (shop.category === 'cafe' && shop.tables?.length) {
+    const activeTables = shop.tables.filter((t) => t.active);
+    return Math.max(1, activeTables.length);
+  }
   const staff = shop.staff || [];
   if (staff.length === 0) return 1;
   const dow = weekdayOf(dateStr);

@@ -57,6 +57,7 @@ const presentOwnerShop = (s) => ({
   images: s.images || [],
   services: s.services.map((x) => ({ id: String(x._id), name: x.name, durationMin: x.durationMin, price: x.price, active: x.active })),
   staff: s.staff.map((x) => ({ id: String(x._id), name: x.name, active: x.active, offDays: x.offDays, offDates: x.offDates })),
+  tables: (s.tables || []).map((x) => ({ id: String(x._id), name: x.name, capacity: x.capacity, active: x.active })),
   weekly: [...s.weekly].sort((a, b) => a.day - b.day).map((d) => ({ day: d.day, open: d.open, intervals: d.intervals.map((i) => ({ start: i.start, end: i.end })) })),
   overrides: [...s.overrides].sort((a, b) => a.date.localeCompare(b.date)).map((o) => ({ date: o.date, closed: o.closed, note: o.note, intervals: o.intervals.map((i) => ({ start: i.start, end: i.end })) })),
   settings: s.settings.toObject ? s.settings.toObject() : s.settings,
@@ -70,6 +71,9 @@ const presentRow = (b, user) => ({
   steppedBackCount: b.steppedBackCount || 0,
   partySize: b.partySize || 1,
   forName: b.forName || '',
+  resourceId: b.resourceId ? String(b.resourceId) : null,
+  resourceName: b.resourceName || '',
+  resourceType: b.resourceType || null,
   type: b.type,
   status: b.status,
   slotTime: b.slotStart != null ? minToHHMM(b.slotStart) : null,
@@ -141,6 +145,13 @@ r.put('/shop/settings', withShop, validate({ body: D.settingsDto }), async (req,
 r.put('/shop/staff', withShop, validate({ body: D.staffDto }), async (req, res) => {
   const known = new Set(req.shop.staff.map((s) => String(s._id)));
   req.shop.staff = req.valid.body.staff.map(({ _id, ...s }) => (_id && known.has(_id) ? { _id, ...s } : s));
+  await req.shop.save();
+  res.json({ shop: presentOwnerShop(req.shop) });
+});
+
+r.put('/shop/tables', withShop, validate({ body: D.tablesDto }), async (req, res) => {
+  const known = new Set((req.shop.tables || []).map((t) => String(t._id)));
+  req.shop.tables = req.valid.body.tables.map(({ _id, ...t }) => (_id && known.has(_id) ? { _id, ...t } : t));
   await req.shop.save();
   res.json({ shop: presentOwnerShop(req.shop) });
 });
@@ -233,9 +244,26 @@ r.post('/bookings/:id/action', withShop, validate({ params: idParam, body: D.act
 });
 
 r.post('/walkin', withShop, requireActiveShop, validate({ body: D.walkinDto }), async (req, res) => {
-  const { name, phone, serviceIds } = req.valid.body;
+  const { name, phone, serviceIds, partySize = 1, resourceId = null } = req.valid.body;
   const chosen = req.shop.services.filter((s) => s.active && serviceIds.includes(String(s._id)));
   if (!chosen.length) throw badRequest('Pick at least one service');
+
+  let resourceName = '';
+  let resourceType = null;
+  if (resourceId) {
+    const st = (req.shop.staff || []).find((x) => String(x._id) === String(resourceId) && x.active);
+    if (st) {
+      resourceName = st.name;
+      resourceType = 'staff';
+    } else {
+      const tb = (req.shop.tables || []).find((x) => String(x._id) === String(resourceId) && x.active);
+      if (tb) {
+        resourceName = tb.name;
+        resourceType = 'table';
+      }
+    }
+  }
+
   const now = nowInZone(req.shop.timezone);
   const b = await withDistributedLock(`shop:${req.shop._id}:${now.date}`, async () => {
     const live = await Booking.countDocuments({ shop: req.shop._id, date: now.date, type: 'queue', status: { $in: ['waiting', 'serving'] } });
@@ -249,8 +277,12 @@ r.post('/walkin', withShop, requireActiveShop, validate({ body: D.walkinDto }), 
       type: 'queue',
       token: c.seq,
       queueOrder: c.seq * 100,
-      services: chosen.map((s) => ({ serviceId: s._id, name: s.name, durationMin: s.durationMin, price: s.price })),
-      durationMin: chosen.reduce((a, s) => a + s.durationMin, 0),
+      partySize,
+      resourceId: resourceId || null,
+      resourceName,
+      resourceType,
+      services: chosen.map((s) => ({ serviceId: s._id, name: s.name, durationMin: s.durationMin * partySize, price: s.price * partySize })),
+      durationMin: chosen.reduce((a, s) => a + s.durationMin, 0) * partySize,
     });
   });
   res.status(201).json({ id: String(b._id), token: b.token });

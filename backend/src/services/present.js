@@ -5,17 +5,32 @@ import { Booking } from '../models/Booking.js';
 
 export const publicService = (s) => ({ id: String(s._id), name: s.name, durationMin: s.durationMin, price: s.price });
 
+export const publicStaff = (s) => ({
+  id: String(s._id),
+  name: s.name,
+  active: s.active !== false,
+  offDays: s.offDays || [],
+  offDates: s.offDates || [],
+});
+
+export const publicTable = (t) => ({
+  id: String(t._id),
+  name: t.name,
+  capacity: t.capacity || 2,
+  active: t.active !== false,
+});
+
 // What a customer sees about a shop
-export async function presentShop(shop, { withQueue = true } = {}) {
+export async function presentShop(shop, { withQueue = true, resourceId = null } = {}) {
   const now = nowInZone(shop.timezone);
   const status = openStatus(shop, now);
   const today = resolveDay(shop, now.date);
   let queue = null;
   if (withQueue && status.state === 'open') {
     const todays = await Booking.find({ shop: shop._id, date: now.date, status: { $in: ['waiting', 'serving'] } })
-      .select('type status durationMin startedAt token')
+      .select('type status durationMin startedAt token resourceId')
       .lean();
-    const est = estimateQueue(shop, todays, now);
+    const est = estimateQueue(shop, todays, now, resourceId);
     queue = { ahead: est.ahead, waitMin: est.waitMin, accepting: shop.settings.acceptQueue && !shop.settings.queuePaused, paused: shop.settings.queuePaused, delayMin: shop.settings.delayMin, delayNote: shop.settings.delayNote };
   }
   return {
@@ -33,7 +48,18 @@ export async function presentShop(shop, { withQueue = true } = {}) {
     images: shop.images || [],
     rating: { avg: Math.round(shop.ratingAvg * 10) / 10, count: shop.ratingCount },
     services: (shop.services || []).filter((s) => s.active).map(publicService),
-    settings: { acceptQueue: shop.settings.acceptQueue, acceptSlots: shop.settings.acceptSlots, slotIntervalMin: shop.settings.slotIntervalMin, advanceDays: shop.settings.advanceDays },
+    staff: (shop.staff || []).filter((s) => s.active).map(publicStaff),
+    tables: (shop.tables || []).filter((t) => t.active).map(publicTable),
+    settings: {
+      acceptQueue: shop.settings.acceptQueue,
+      acceptSlots: shop.settings.acceptSlots,
+      slotIntervalMin: shop.settings.slotIntervalMin,
+      advanceDays: shop.settings.advanceDays,
+      maxQueue: shop.settings.maxQueue,
+      graceMin: shop.settings.graceMin,
+      allowStaffSelection: !!shop.settings.allowStaffSelection,
+      allowTableSelection: !!shop.settings.allowTableSelection,
+    },
     today: {
       date: now.date,
       state: status.state,
@@ -59,6 +85,9 @@ export const presentBooking = (b, extra = {}) => ({
   durationMin: b.durationMin,
   partySize: b.partySize || 1,
   forName: b.forName || '',
+  resourceId: b.resourceId ? String(b.resourceId) : null,
+  resourceName: b.resourceName || '',
+  resourceType: b.resourceType || null,
   steppedBackCount: b.steppedBackCount || 0,
   hasPush: (b.pushSubscriptions || []).length > 0,
   status: b.status,

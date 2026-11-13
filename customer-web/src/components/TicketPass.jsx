@@ -350,6 +350,26 @@ export default function TicketPass({ booking, justCancelled = false }) {
                   <div style={{ marginTop: 10, fontSize: 18, fontWeight: 700, color: '#111111' }}>
                     {live.ahead === 0 ? 'Any moment now' : `Estimated wait: ~${mins(live.etaMin)}`}
                   </div>
+                  {live.ahead > 0 && live.ahead <= 2 && (
+                    <div
+                      style={{
+                        marginTop: 14,
+                        padding: '8px 14px',
+                        borderRadius: 12,
+                        background: 'rgba(255, 92, 0, 0.08)',
+                        border: '1px solid rgba(255, 92, 0, 0.25)',
+                        color: 'var(--accent, #ff5c00)',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <span>🔔</span>
+                      <span>Almost your turn! Please head to the shop.</span>
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -464,6 +484,15 @@ export default function TicketPass({ booking, justCancelled = false }) {
               </div>
               <div style={{ fontSize: 14, fontWeight: 600, color: '#111111', marginTop: 3 }}>
                 {mins(b.durationMin)}
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#888888', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                {b.resourceType === 'table' ? 'Table' : 'Stylist / Resource'}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#111111', marginTop: 3 }}>
+                {b.resourceName || 'First Available'}
               </div>
             </div>
 

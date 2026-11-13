@@ -92,7 +92,7 @@ async function nextToken(shopId, date) {
 }
 
 r.post('/', validate({ body: createBookingDto }), async (req, res) => {
-  const { slug, type, serviceIds, slotStart, partySize, forName } = req.valid.body;
+  const { slug, type, serviceIds, slotStart, partySize, forName, resourceId } = req.valid.body;
   const shop = await Shop.findOne({ slug }).lean();
   if (!shop) throw notFound('Shop not found');
   if (shop.isActive === false) throw forbidden('This shop is temporarily turned off by administrator.', 'shop_disabled');
@@ -100,6 +100,25 @@ r.post('/', validate({ body: createBookingDto }), async (req, res) => {
   const chosen = shop.services.filter((s) => s.active && serviceIds.includes(String(s._id)));
   if (chosen.length !== new Set(serviceIds).size) throw badRequest('One of the services is not available', 'bad_service');
   const durationMin = chosen.reduce((a, s) => a + s.durationMin, 0) * partySize;
+
+  let resourceName = '';
+  let resourceType = null;
+  if (resourceId) {
+    const st = (shop.staff || []).find((s) => String(s._id) === String(resourceId) && s.active);
+    if (st) {
+      resourceName = st.name;
+      resourceType = 'staff';
+    } else {
+      const tb = (shop.tables || []).find((t) => String(t._id) === String(resourceId) && t.active);
+      if (tb) {
+        if (tb.capacity < partySize) throw badRequest(`Selected table only seats up to ${tb.capacity} people.`);
+        resourceName = tb.name;
+        resourceType = 'table';
+      } else {
+        throw badRequest('Selected staff or table is unavailable');
+      }
+    }
+  }
 
   const now = nowInZone(shop.timezone);
   const date = type === 'queue' ? now.date : req.valid.body.date;
@@ -119,11 +138,11 @@ r.post('/', validate({ body: createBookingDto }), async (req, res) => {
     }
 
     const dayBookings = await Booking.find({ shop: shop._id, date, status: { $in: ['waiting', 'serving', 'done'] } })
-      .select('type status durationMin startedAt token slotStart')
+      .select('type status durationMin startedAt token slotStart resourceId')
       .lean();
 
     if (type === 'queue') {
-      const d = queueDecision(shop, dayBookings.filter((b) => b.status !== 'done'), durationMin, now);
+      const d = queueDecision(shop, dayBookings.filter((b) => b.status !== 'done'), durationMin, now, resourceId);
       if (!d.ok) throw new AppError(409, d.reason, 'queue_unavailable');
     } else {
       if (!shop.settings.acceptSlots) throw new AppError(409, 'This shop does not take slot bookings.', 'slots_unavailable');
@@ -146,6 +165,9 @@ r.post('/', validate({ body: createBookingDto }), async (req, res) => {
       queueOrder: type === 'queue' ? token * 100 : null,
       partySize,
       forName: cleanFor,
+      resourceId: resourceId || null,
+      resourceName,
+      resourceType,
       slotStart: type === 'slot' ? slotStart : undefined,
       services: chosen.map((s) => ({ serviceId: s._id, name: s.name, durationMin: s.durationMin * partySize, price: s.price * partySize })),
       durationMin,
@@ -180,7 +202,7 @@ async function hydrateBooking(b, shop) {
   let live = null;
   if (b.type === 'queue' && ['waiting', 'serving'].includes(b.status)) {
     const todays = await Booking.find({ shop: shop._id, date: b.date, type: 'queue', status: { $in: ['waiting', 'serving'] } })
-      .select('type status durationMin startedAt token queueOrder steppedBackCount')
+      .select('type status durationMin startedAt token queueOrder steppedBackCount resourceId')
       .lean();
     live = positionOf(b, { settings: shop.settings, _cap: capacityOn(shop, b.date) }, todays);
     const nowServing = todays.filter((x) => x.status === 'serving').map((x) => x.token);

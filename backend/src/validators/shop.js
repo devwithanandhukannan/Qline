@@ -30,6 +30,21 @@ export const serviceDto = z
   })
   .strict();
 
+export const tableDto = z
+  .object({
+    _id: objectId.optional(),
+    name: text(60).min(1),
+    capacity: z.number().int().min(1).max(50).default(2),
+    active: z.boolean().default(true),
+  })
+  .strict();
+
+export const tablesDto = z
+  .object({
+    tables: z.array(tableDto).max(50),
+  })
+  .strict();
+
 export const createShopDto = z
   .object({
     name: text(80).min(2),
@@ -43,6 +58,7 @@ export const createShopDto = z
     lng: z.number().min(-180).max(180).optional(),
     images: z.array(z.string().max(300_000)).max(3).optional(),
     services: z.array(serviceDto).max(30).optional(),
+    tables: z.array(tableDto).max(50).optional(),
   })
   .strict();
 
@@ -67,6 +83,8 @@ export const settingsDto = z
     graceMin: z.number().int().min(1).max(60),
     advanceDays: z.number().int().min(0).max(60),
     enableTvScreen: z.boolean(),
+    allowStaffSelection: z.boolean(),
+    allowTableSelection: z.boolean(),
   })
   .partial()
   .strict();
@@ -105,6 +123,8 @@ export const walkinDto = z
     name: text(80).optional().default('Anonymous').transform((val) => (val && val.trim() ? val.trim() : 'Anonymous')),
     phone: optionalPhone,
     serviceIds: z.array(objectId).min(1).max(6),
+    partySize: z.number().int().min(1).max(50).default(1),
+    resourceId: objectId.nullable().optional(),
   })
   .strict();
 

@@ -20,6 +20,7 @@ function Row({ b, onAction, busy }) {
         <div className="row wrap" style={{ gap: 8 }}>
           <b style={{ fontSize: 17 }}>{b.name}</b>
           {b.partySize > 1 && <span className="tag">{b.partySize} people</span>}
+          {b.resourceName && <span className="tag">{b.resourceType === 'table' ? `🍽️ ${b.resourceName}` : `✂️ ${b.resourceName}`}</span>}
           {b.steppedBackCount > 0 && <span className="tag">Stepped back</span>}
           {b.isWalkin && <span className="tag">Walk-in</span>}
           {b.type === 'slot' && b.slotTime && <span className="tag">Slot {time12(b.slotTime)}</span>}
@@ -240,15 +241,21 @@ function WalkinSheet({ open, onClose, shop, onDone }) {
   const toast = useToast();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [partySize, setPartySize] = useState('1');
+  const [resourceId, setResourceId] = useState(null);
   const [ids, setIds] = useState([]);
   const [err, setErr] = useState({});
   const [busy, setBusy] = useState(false);
   const services = (shop?.services || []).filter((s) => s.active);
+  const activeStaff = (shop?.staff || []).filter((s) => s.active);
+  const activeTables = (shop?.tables || []).filter((t) => t.active);
 
   useEffect(() => {
     if (open) {
       setName('');
       setPhone('');
+      setPartySize('1');
+      setResourceId(null);
       setErr({});
       setIds(services.length === 1 ? [services[0].id] : []);
     }
@@ -261,7 +268,16 @@ function WalkinSheet({ open, onClose, shop, onDone }) {
     const finalName = name.trim() || 'Anonymous';
     setBusy(true);
     try {
-      const r = await api('/org/walkin', { method: 'POST', body: { name: finalName, phone: phone.trim(), serviceIds: ids } });
+      const r = await api('/org/walkin', {
+        method: 'POST',
+        body: {
+          name: finalName,
+          phone: phone.trim(),
+          serviceIds: ids,
+          partySize: Number(partySize) || 1,
+          resourceId: resourceId || undefined,
+        },
+      });
       toast.show(`Added as token ${r.token}`);
       onDone();
     } catch (e2) {
@@ -277,6 +293,40 @@ function WalkinSheet({ open, onClose, shop, onDone }) {
       <form className="stack" onSubmit={save} noValidate>
         <Input label="Name (optional)" value={name} onChange={(e) => setName(e.target.value)} error={err.name} maxLength={80} placeholder="Customer name (defaults to Anonymous)" />
         <Input label="Phone (optional)" type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} error={err.phone} maxLength={20} />
+        <Input label="People (Party Size)" type="number" min={1} max={50} value={partySize} onChange={(e) => setPartySize(e.target.value)} placeholder="1" />
+
+        {activeStaff.length > 0 && (
+          <div className="field">
+            <label>Stylist / Barber (optional)</label>
+            <div className="row wrap" style={{ gap: 8 }}>
+              <button type="button" className={cx('chip', !resourceId && 'on')} onClick={() => setResourceId(null)}>
+                First Available
+              </button>
+              {activeStaff.map((st) => (
+                <button key={st.id} type="button" className={cx('chip', resourceId === st.id && 'on')} onClick={() => setResourceId(st.id)}>
+                  {st.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTables.length > 0 && (
+          <div className="field">
+            <label>Table (optional)</label>
+            <div className="row wrap" style={{ gap: 8 }}>
+              <button type="button" className={cx('chip', !resourceId && 'on')} onClick={() => setResourceId(null)}>
+                Any Table
+              </button>
+              {activeTables.map((t) => (
+                <button key={t.id} type="button" className={cx('chip', resourceId === t.id && 'on')} onClick={() => setResourceId(t.id)}>
+                  {t.name} ({t.capacity} seats)
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="field">
           <label>Services</label>
           <div className="row wrap" style={{ gap: 8 }}>

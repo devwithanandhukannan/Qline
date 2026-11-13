@@ -21,6 +21,7 @@ const SECTIONS = [
   ['services', 'Services'],
   ['hours', 'Hours'],
   ['staff', 'Staff'],
+  ['tables', 'Tables'],
   ['rules', 'Rules'],
   ['qr', 'QR code'],
   ['account', 'Account'],
@@ -282,12 +283,105 @@ function Staff({ shop, reload }) {
   );
 }
 
+/* ---------------- Tables ---------------- */
+function Tables({ shop, reload }) {
+  const confirm = useConfirm();
+  const { busy, run } = useSave(reload);
+  const [list, setList] = useState((shop.tables || []).map((t) => ({ ...t })));
+  const upd = (i, patch) => setList(list.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+
+  async function remove(i) {
+    const ok = await confirm({
+      title: `Remove ${list[i].name || 'this table'}?`,
+      message: 'This table will be removed from your cafe seating options.',
+      confirmText: 'Remove',
+      destructive: true,
+    });
+    if (ok) setList(list.filter((_, j) => j !== i));
+  }
+
+  const save = () =>
+    run(() =>
+      api('/org/shop/tables', {
+        method: 'PUT',
+        body: {
+          tables: list.map((t) => ({
+            ...(t.id ? { _id: t.id } : {}),
+            name: t.name.trim() || 'Table',
+            capacity: Number(t.capacity) || 2,
+            active: t.active !== false,
+          })),
+        },
+      })
+    );
+
+  return (
+    <div className="stack">
+      <p className="muted small">
+        Tables and seating capacity for your cafe or restaurant. When table selection is enabled under Rules, customers see available tables filtered by party size.
+      </p>
+      {list.length === 0 && (
+        <div className="card center muted small">No tables added yet. Add tables with their seating capacity (e.g. Table 1: 2-seater, Table 2: 4-seater).</div>
+      )}
+      {list.map((t, i) => (
+        <div key={t.id || `t${i}`} className="card row" style={{ gap: 10, alignItems: 'center' }}>
+          <input
+            className="input grow"
+            aria-label="Table name"
+            value={t.name}
+            onChange={(e) => upd(i, { name: e.target.value })}
+            maxLength={60}
+            placeholder="e.g. Table 1, Window Table"
+          />
+          <div style={{ width: 120, flex: 'none' }}>
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={50}
+              aria-label="Seats capacity"
+              value={t.capacity}
+              onChange={(e) => upd(i, { capacity: Number(e.target.value) || 1 })}
+              placeholder="Seats"
+            />
+          </div>
+          <Switch checked={t.active !== false} onChange={(v) => upd(i, { active: v })} label="Available" />
+          <button className="ico-btn" aria-label="Remove table" onClick={() => remove(i)}>
+            <Trash />
+          </button>
+        </div>
+      ))}
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => setList([...list, { name: `Table ${list.length + 1}`, capacity: 4, active: true }])}
+        style={{ alignSelf: 'flex-start' }}
+      >
+        <Plus width="16" height="16" /> Add table
+      </Button>
+      <Button block loading={busy} onClick={save}>
+        Save tables
+      </Button>
+    </div>
+  );
+}
+
 /* ---------------- Rules ---------------- */
 function Rules({ shop, reload }) {
   const toast = useToast();
   const { busy, errs, run } = useSave(reload);
   const s0 = shop.settings;
-  const [s, setS] = useState({ acceptQueue: s0.acceptQueue, acceptSlots: s0.acceptSlots, enableTvScreen: !!s0.enableTvScreen, maxQueue: String(s0.maxQueue), slotIntervalMin: String(s0.slotIntervalMin), graceMin: String(s0.graceMin), advanceDays: String(s0.advanceDays) });
+  const [s, setS] = useState({
+    acceptQueue: s0.acceptQueue,
+    acceptSlots: s0.acceptSlots,
+    enableTvScreen: !!s0.enableTvScreen,
+    allowStaffSelection: !!s0.allowStaffSelection,
+    allowTableSelection: !!s0.allowTableSelection,
+    maxQueue: String(s0.maxQueue),
+    slotIntervalMin: String(s0.slotIntervalMin),
+    graceMin: String(s0.graceMin),
+    advanceDays: String(s0.advanceDays),
+  });
   const num = (k) => (e) => setS({ ...s, [k]: e.target.value.replace(/\D/g, '') });
   const [err, setErr] = useState('');
   const tvLink = `${CUSTOMER_URL}/tv/${shop.slug}`;
@@ -295,7 +389,22 @@ function Rules({ shop, reload }) {
   function save() {
     if (!s.acceptQueue && !s.acceptSlots) return setErr('Keep at least one of queue or slot booking on');
     setErr('');
-    run(() => api('/org/shop/settings', { method: 'PUT', body: { acceptQueue: s.acceptQueue, acceptSlots: s.acceptSlots, enableTvScreen: s.enableTvScreen, maxQueue: Number(s.maxQueue), slotIntervalMin: Number(s.slotIntervalMin), graceMin: Number(s.graceMin), advanceDays: Number(s.advanceDays) } }));
+    run(() =>
+      api('/org/shop/settings', {
+        method: 'PUT',
+        body: {
+          acceptQueue: s.acceptQueue,
+          acceptSlots: s.acceptSlots,
+          enableTvScreen: s.enableTvScreen,
+          allowStaffSelection: s.allowStaffSelection,
+          allowTableSelection: s.allowTableSelection,
+          maxQueue: Number(s.maxQueue),
+          slotIntervalMin: Number(s.slotIntervalMin),
+          graceMin: Number(s.graceMin),
+          advanceDays: Number(s.advanceDays),
+        },
+      })
+    );
   }
 
   async function copyTvLink() {
@@ -317,6 +426,8 @@ function Rules({ shop, reload }) {
       <div className="list">
         <div className="item"><div className="grow"><b>Live queue</b><div className="small muted">Customers join today and see their turn live. Best for walk-in shops.</div></div><Switch checked={s.acceptQueue} onChange={(v) => setS({ ...s, acceptQueue: v })} label="Live queue" /></div>
         <div className="item"><div className="grow"><b>Slot booking</b><div className="small muted">Customers pick a time, today or in the coming days.</div></div><Switch checked={s.acceptSlots} onChange={(v) => setS({ ...s, acceptSlots: v })} label="Slot booking" /></div>
+        <div className="item"><div className="grow"><b>Allow customers to choose staff / stylist</b><div className="small muted">Customers can select a specific stylist or choose First Available for the shortest wait.</div></div><Switch checked={s.allowStaffSelection} onChange={(v) => setS({ ...s, allowStaffSelection: v })} label="Allow staff selection" /></div>
+        <div className="item"><div className="grow"><b>Enable table selection (for cafes / dining)</b><div className="small muted">Customers choose a table filtered by party size or choose First Available table.</div></div><Switch checked={s.allowTableSelection} onChange={(v) => setS({ ...s, allowTableSelection: v })} label="Enable table selection" /></div>
         <div className="item"><div className="grow"><b>Live TV / Counter display (optional)</b><div className="small muted">Public fullscreen screen showing Now Serving &amp; Up Next on a shop TV or tablet.</div></div><Switch checked={s.enableTvScreen} onChange={toggleTv} label="Live TV display" /></div>
       </div>
       {s.enableTvScreen && (
@@ -439,6 +550,7 @@ function Settings() {
     services: <Services key="s" shop={shop} reload={reload} />,
     hours: <Hours key="h" shop={shop} reload={reload} />,
     staff: <Staff key="st" shop={shop} reload={reload} />,
+    tables: <Tables key="tb" shop={shop} reload={reload} />,
     rules: <Rules key="r" shop={shop} reload={reload} />,
     qr: <QrBlock key="q" shop={shop} />,
     account: <Account key="a" />,
