@@ -1,0 +1,31 @@
+{
+  "name": "qline-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed:admin": "node --env-file-if-exists=.env src/scripts/seedAdmin.js",
+    "test": "node --test test/*.test.js",
+    "test:e2e": "node test/e2e/e2e.mjs",
+    "test:race": "node --env-file-if-exists=.env test/e2e/bookingRace.e2e.mjs"
+  },
+  "dependencies": {
+    "compression": "^1.8.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.3",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.12.0",
+    "nodemailer": "^10.3.1",
+    "zod": "^4.6.7"
+  }
+}

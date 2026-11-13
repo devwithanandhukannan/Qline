@@ -1,0 +1,56 @@
+# Render Blueprint for the API. Dashboard > New > Blueprint, pick your repo.
+services:
+  - type: web
+    name: qline-api
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install --omit=dev
+    startCommand: node src/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: OTP_PEPPER
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: CUSTOMER_APP_URL
+        sync: false
+      - key: ORG_APP_URL
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      # Email. Render FREE blocks SMTP, so pick brevo or gmail_api (see README), or a paid instance for smtp.
+      - key: MAIL_PROVIDER
+        sync: false
+      - key: MAIL_FROM_EMAIL
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
