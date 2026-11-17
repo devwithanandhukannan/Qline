@@ -1,10 +1,15 @@
 'use client';
 import Link from 'next/link';
-import { Coffee, Pin, Scissors } from './icons';
+import { Coffee, Pin, Scissors, Shield, Store } from './icons';
 import { Stars } from './ui';
 import { mins, time12 } from '@/lib/format';
 
-export const categoryIcon = (c) => (c === 'cafe' ? Coffee : Scissors);
+export const categoryIcon = (c) => {
+  if (c === 'cafe') return Coffee;
+  if (c === 'clinic') return Shield;
+  if (c === 'other') return Store;
+  return Scissors;
+};
 
 export function statusLine(shop) {
   const t = shop.today;

@@ -278,7 +278,12 @@ r.get('/mine', validate({ query: mineQuery }), async (req, res) => {
   }
 
   const [rows, total] = await Promise.all([
-    Booking.find(filter).sort({ date: scope === 'active' ? 1 : -1, createdAt: -1 }).skip((page - 1) * limit).limit(limit).populate('shop', 'name slug area city').lean(),
+    Booking.find(filter)
+      .sort({ date: scope === 'active' ? 1 : -1, createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('shop', 'name slug area city category')
+      .lean(),
     Booking.countDocuments(filter),
   ]);
 
@@ -286,7 +291,19 @@ r.get('/mine', validate({ query: mineQuery }), async (req, res) => {
 
   res.json({
     total: req.user ? total : authorizedRows.length,
-    bookings: authorizedRows.map((b) => presentBooking(b, { shop: b.shop ? { name: b.shop.name, slug: b.shop.slug, area: b.shop.area, city: b.shop.city } : null })),
+    bookings: authorizedRows.map((b) =>
+      presentBooking(b, {
+        shop: b.shop
+          ? {
+              name: b.shop.name,
+              slug: b.shop.slug,
+              area: b.shop.area,
+              city: b.shop.city,
+              category: b.shop.category,
+            }
+          : null,
+      })
+    ),
   });
 });
 
@@ -303,7 +320,17 @@ async function hydrateBooking(b, shop) {
   const st = openStatus(shop);
   return presentBooking(b, {
     live,
-    shop: { name: shop.name, slug: shop.slug, phone: shop.phone, address: shop.address, area: shop.area, city: shop.city },
+    shop: {
+      name: shop.name,
+      slug: shop.slug,
+      phone: shop.phone,
+      address: shop.address,
+      area: shop.area,
+      city: shop.city,
+      category: shop.category,
+      lat: shop.lat,
+      lng: shop.lng,
+    },
     graceMin: shop.settings.graceMin,
     delay: shop.settings.delayMin ? { min: shop.settings.delayMin, note: shop.settings.delayNote } : null,
     shopState: st.state,
