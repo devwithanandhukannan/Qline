@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sheet, Button, Segmented, Skeleton, Input, Switch, cx, useToast } from './ui';
+import { Bolt, User, Utensils, Check } from './icons';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { addDaysStr, dayLabel, mins, money, time12 } from '@/lib/format';
@@ -329,31 +330,54 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
         </div>
 
         {shop.settings?.allowStaffSelection && (shop.staff || []).length > 0 && (
-          <div className="card stack-sm" style={{ padding: '12px 14px' }}>
+          <div className="card stack-sm" style={{ padding: '14px 16px' }}>
             <div className="row between" style={{ gap: 8 }}>
               <div>
                 <b style={{ fontSize: 14 }}>Choose Stylist</b>
-                <div className="small muted">Anyone / First Available gets you served the fastest</div>
+                <div className="small muted">First Available gets you served fastest</div>
               </div>
             </div>
-            <div className="row wrap" style={{ gap: 8, marginTop: 4 }}>
+            <div className="circle-picker">
               <button
                 type="button"
-                className={cx('chip', !selectedResource && 'on')}
+                className={cx('circle-opt', !selectedResource && 'on')}
                 onClick={() => handleResourceChange(null)}
+                aria-label="Anyone (First Available)"
               >
-                ⚡ Anyone (Fastest)
+                <div className="circle-avatar">
+                  <Bolt width="22" height="22" />
+                  {!selectedResource && (
+                    <span className="circle-check">
+                      <Check width="10" height="10" />
+                    </span>
+                  )}
+                </div>
+                <span className="circle-name">Anyone</span>
+                <span className="circle-sub">Fastest</span>
               </button>
-              {shop.staff.map((st) => (
-                <button
-                  type="button"
-                  key={st.id}
-                  className={cx('chip', selectedResource === st.id && 'on')}
-                  onClick={() => handleResourceChange(st.id)}
-                >
-                  ✂️ {st.name}
-                </button>
-              ))}
+              {shop.staff.map((st) => {
+                const isSelected = selectedResource === st.id;
+                return (
+                  <button
+                    type="button"
+                    key={st.id}
+                    className={cx('circle-opt', isSelected && 'on')}
+                    onClick={() => handleResourceChange(st.id)}
+                    aria-label={st.name}
+                  >
+                    <div className="circle-avatar">
+                      <User width="22" height="22" />
+                      {isSelected && (
+                        <span className="circle-check">
+                          <Check width="10" height="10" />
+                        </span>
+                      )}
+                    </div>
+                    <span className="circle-name">{st.name}</span>
+                    <span className="circle-sub">Stylist</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -361,7 +385,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
         {shop.settings?.allowTableSelection && (shop.tables || []).length > 0 && (() => {
           const matching = (shop.tables || []).filter((t) => t.active && t.capacity >= count);
           return (
-            <div className="card stack-sm" style={{ padding: '12px 14px' }}>
+            <div className="card stack-sm" style={{ padding: '14px 16px' }}>
               <div className="row between" style={{ gap: 8 }}>
                 <div>
                   <b style={{ fontSize: 14 }}>Choose Table</b>
@@ -371,24 +395,47 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
                 </div>
               </div>
               {matching.length > 0 ? (
-                <div className="row wrap" style={{ gap: 8, marginTop: 4 }}>
+                <div className="circle-picker">
                   <button
                     type="button"
-                    className={cx('chip', !selectedResource && 'on')}
+                    className={cx('circle-opt', !selectedResource && 'on')}
                     onClick={() => handleResourceChange(null)}
+                    aria-label="Any Table (First Available)"
                   >
-                    🍽️ Any Table (Fastest)
+                    <div className="circle-avatar">
+                      <Bolt width="22" height="22" />
+                      {!selectedResource && (
+                        <span className="circle-check">
+                          <Check width="10" height="10" />
+                        </span>
+                      )}
+                    </div>
+                    <span className="circle-name">Any Table</span>
+                    <span className="circle-sub">Fastest</span>
                   </button>
-                  {matching.map((t) => (
-                    <button
-                      type="button"
-                      key={t.id}
-                      className={cx('chip', selectedResource === t.id && 'on')}
-                      onClick={() => handleResourceChange(t.id)}
-                    >
-                      🍽️ {t.name} ({t.capacity} seats)
-                    </button>
-                  ))}
+                  {matching.map((t) => {
+                    const isSelected = selectedResource === t.id;
+                    return (
+                      <button
+                        type="button"
+                        key={t.id}
+                        className={cx('circle-opt', isSelected && 'on')}
+                        onClick={() => handleResourceChange(t.id)}
+                        aria-label={t.name}
+                      >
+                        <div className="circle-avatar">
+                          <Utensils width="20" height="20" />
+                          {isSelected && (
+                            <span className="circle-check">
+                              <Check width="10" height="10" />
+                            </span>
+                          )}
+                        </div>
+                        <span className="circle-name">{t.name}</span>
+                        <span className="circle-sub">{t.capacity} seats</span>
+                      </button>
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="small err-text" style={{ margin: 0 }}>

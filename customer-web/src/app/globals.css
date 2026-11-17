@@ -164,6 +164,23 @@ img, svg { display: block; max-width: 100%; }
 .chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 20px; margin: 0 -20px; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
 
+/* round circle picker UI */
+.circle-picker { display: flex; gap: 14px; overflow-x: auto; padding: 6px 2px 8px; margin: 0 -2px; scrollbar-width: none; align-items: flex-start; -webkit-overflow-scrolling: touch; }
+.circle-picker::-webkit-scrollbar { display: none; }
+.circle-opt { display: flex; flex-direction: column; align-items: center; gap: 6px; background: transparent; border: 0; padding: 0; cursor: pointer; min-width: 66px; max-width: 78px; text-align: center; color: var(--fg); font-family: inherit; flex: none; outline: none; -webkit-tap-highlight-color: transparent; }
+.circle-opt:hover .circle-avatar { border-color: var(--fg-3); transform: translateY(-2px); }
+.circle-opt:active .circle-avatar { transform: scale(0.95); }
+.circle-avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--bg-3); border: 2px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--fg-2); position: relative; transition: all 0.2s var(--ease); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08); }
+.circle-avatar svg { stroke-width: 2; transition: transform 0.2s var(--ease), stroke 0.2s; }
+.circle-opt.on .circle-avatar { background: var(--inv-bg); color: var(--inv-fg); border-color: var(--inv-bg); box-shadow: 0 0 0 3px color-mix(in srgb, var(--inv-bg) 30%, transparent), 0 4px 12px rgba(0, 0, 0, 0.2); }
+.circle-opt.on .circle-avatar svg { stroke: var(--inv-fg); stroke-width: 2.2; }
+.circle-check { position: absolute; bottom: -1px; right: -1px; width: 18px; height: 18px; border-radius: 50%; background: var(--ok, #10b981); color: #fff; display: flex; align-items: center; justify-content: center; border: 2px solid var(--bg-2); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); animation: pop 0.2s var(--ease) both; }
+.circle-check svg { stroke: #fff; stroke-width: 3; }
+.circle-name { font-size: 13px; font-weight: 500; line-height: 1.25; color: var(--fg-2); max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 0.2s, font-weight 0.2s; }
+.circle-opt.on .circle-name { color: var(--fg); font-weight: 600; }
+.circle-sub { font-size: 11px; font-weight: 500; color: var(--fg-3); line-height: 1; margin-top: -2px; }
+.circle-opt.on .circle-sub { color: var(--fg-2); }
+
 .badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--bg-2); color: var(--fg-2); }
 .pilltag { display: inline-flex; align-items: center; padding: 2px 11px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; font-weight: 500; color: var(--fg-2); background: var(--bg); width: fit-content; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); flex: none; }

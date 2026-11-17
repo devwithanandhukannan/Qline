@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Shell, { useShop } from '@/components/Shell';
 import { Button, Empty, Input, Sheet, Switch, cx, useConfirm, useToast } from '@/components/ui';
 import { DashboardSkeleton } from '@/components/Skeletons';
-import { Check, Clock, Phone, Play, Plus, Qr, Users, WhatsApp, X } from '@/components/icons';
+import { Check, Clock, Phone, Play, Plus, Qr, Scissors, Users, Utensils, WhatsApp, X } from '@/components/icons';
 import { api, ApiError } from '@/lib/api';
 import { mins, time12 } from '@/lib/format';
 
@@ -43,8 +43,9 @@ function Row({ b, onAction, busy, busyResourceIds, shopName }) {
           <b style={{ fontSize: 17 }}>{b.name}</b>
           {b.partySize > 1 && <span className="tag">{b.partySize} people</span>}
           {b.resourceName && (
-            <span className={cx('tag', resBusy && 'warn')}>
-              {b.resourceType === 'table' ? `🍽️ ${b.resourceName}` : `✂️ ${b.resourceName}`}
+            <span className={cx('tag', resBusy && 'warn')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              {b.resourceType === 'table' ? <Utensils width="12" height="12" /> : <Scissors width="12" height="12" />}
+              {b.resourceName}
               {resBusy ? ' (In chair)' : ''}
             </span>
           )}
@@ -279,9 +280,11 @@ function Dashboard() {
                   key={resId}
                   className={cx('tag', filterResource === resId && 'accent')}
                   onClick={() => setFilterResource(resId)}
-                  style={{ cursor: 'pointer', padding: '5px 12px', borderRadius: 999 }}
+                  style={{ cursor: 'pointer', padding: '5px 12px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', gap: 5 }}
                 >
-                  {res.capacity ? `🍽️ ${res.name}` : `✂️ ${res.name}`} ({resCount})
+                  {res.capacity ? <Utensils width="13" height="13" /> : <Scissors width="13" height="13" />}
+                  <span>{res.name}</span>
+                  <span style={{ opacity: 0.7 }}>({resCount})</span>
                 </button>
               );
             })}
