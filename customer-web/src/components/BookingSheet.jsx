@@ -3,12 +3,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sheet, Button, Segmented, Skeleton, Input, Switch, cx, useToast } from './ui';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { addDaysStr, dayLabel, mins, money, time12 } from '@/lib/format';
 
 // Confirm sheet for both flows: join the live queue now, or pick a day + time slot.
 export default function BookingSheet({ open, onClose, shop, serviceIds, initialMode }) {
   const router = useRouter();
   const toast = useToast();
+  const { user } = useAuth();
   const [mode, setMode] = useState(initialMode);
   const [date, setDate] = useState(shop.today.date);
   const [avail, setAvail] = useState(null);
@@ -18,6 +20,8 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
   const [resQueue, setResQueue] = useState(null);
   const [forOther, setForOther] = useState(false);
   const [forName, setForName] = useState('');
+  const [guestName, setGuestName] = useState('');
+  const [guestPhone, setGuestPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [holding, setHolding] = useState(false);
   const [holdUntil, setHoldUntil] = useState(0);
@@ -184,6 +188,10 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
 
   async function book() {
     if (bookingRef.current || holding) return;
+    if (!user && !guestName.trim()) {
+      setError('Please enter your name to take a token');
+      return;
+    }
     if (forOther && !forName.trim()) {
       setError('Enter the name of the person you are booking for');
       return;
@@ -198,13 +206,22 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
         serviceIds,
         partySize: count,
         ...(selectedResource ? { resourceId: selectedResource } : {}),
-        ...(forOther && forName.trim() ? { forName: forName.trim() } : {}),
+        ...(user
+          ? (forOther && forName.trim() ? { forName: forName.trim() } : {})
+          : { guestName: guestName.trim(), guestPhone: guestPhone.trim(), forName: forOther && forName.trim() ? forName.trim() : guestName.trim() }),
         ...(mode === 'slot' ? { date, slotStart: slot } : {}),
       };
       const r = await api('/bookings', { method: 'POST', body });
       holdActiveRef.current = false;
       setHoldUntil(0);
       setHoldSec(0);
+      if (typeof window !== 'undefined' && r.booking?.id) {
+        try {
+          const prev = JSON.parse(localStorage.getItem('qline_guest_bookings') || '[]');
+          const next = [r.booking.id, ...prev.filter((id) => id !== r.booking.id)].slice(0, 20);
+          localStorage.setItem('qline_guest_bookings', JSON.stringify(next));
+        } catch {}
+      }
       toast.show(mode === 'queue' ? 'You are in the queue' : 'Slot booked');
       onClose();
       router.push(`/b/${r.booking.id}?new=1`);
@@ -426,6 +443,32 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
               </div>
             )}
             {avail?.note && <p className="small muted center">{avail.note}</p>}
+          </div>
+        )}
+
+        {!user && (
+          <div className="card enter" style={{ background: 'var(--surface-sunken)', padding: 14, borderRadius: 14, border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <b style={{ fontSize: 14 }}>Your details</b>
+              <span className="small muted">No account needed</span>
+            </div>
+            <div className="stack-sm" style={{ gap: 10 }}>
+              <Input
+                label="Your name"
+                placeholder="e.g. Anandhu"
+                value={guestName}
+                onChange={(e) => { setGuestName(e.target.value); setError(''); }}
+                autoComplete="name"
+              />
+              <Input
+                label="Mobile number (optional, for alerts)"
+                placeholder="e.g. 9876543210"
+                value={guestPhone}
+                onChange={(e) => setGuestPhone(e.target.value)}
+                type="tel"
+                autoComplete="tel"
+              />
+            </div>
           </div>
         )}
 

@@ -15,6 +15,58 @@ function useClock() {
   return now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
+function playChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+
+    const now = ctx.currentTime;
+    const notes = [
+      { f: 659.25, t: 0, d: 0.9 },
+      { f: 880.0, t: 0.2, d: 1.2 },
+    ];
+    notes.forEach(({ f, t, d }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, now + t);
+      gain.gain.setValueAtTime(0.001, now + t);
+      gain.gain.exponentialRampToValueAtTime(0.35, now + t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + t + d);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + t);
+      osc.stop(now + t + d + 0.1);
+    });
+  } catch (err) {
+    console.warn('Audio chime unavailable', err);
+  }
+}
+
+function announceCallout(tokens) {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return;
+  try {
+    window.speechSynthesis.cancel();
+    if (!tokens || tokens.length === 0) return;
+    const first = tokens[0];
+    let phrase = `Token number ${first.token}.`;
+    if (first.name) phrase = `Token ${first.token}, ${first.name}.`;
+    if (first.resourceName) {
+      phrase += ` Please proceed to ${first.resourceName}.`;
+    }
+    const utter = new SpeechSynthesisUtterance(phrase);
+    utter.rate = 0.92;
+    utter.pitch = 1.05;
+    setTimeout(() => {
+      try {
+        window.speechSynthesis.speak(utter);
+      } catch {}
+    }, 450);
+  } catch {}
+}
+
 function InterlockingNotch() {
   return (
     <div style={{ width: '100%', height: 22, position: 'relative', overflow: 'hidden', background: '#0b0c10', lineHeight: 0 }} aria-hidden="true">
@@ -160,9 +212,31 @@ export default function TvDisplayPage() {
   const [leavingEmpty, setLeavingEmpty] = useState(false);
   const [callingIds, setCallingIds] = useState([]);
   const [shiftSeq, setShiftSeq] = useState(0);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const audioEnabledRef = useRef(false);
   const viewQueueRef = useRef(null);
   const swapTimerRef = useRef(null);
   const pulseTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('qline_tv_sound') === '1';
+      setAudioEnabled(saved);
+      audioEnabledRef.current = saved;
+    }
+  }, []);
+
+  const toggleAudio = () => {
+    const next = !audioEnabled;
+    setAudioEnabled(next);
+    audioEnabledRef.current = next;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('qline_tv_sound', next ? '1' : '0');
+    }
+    if (next) {
+      playChime();
+    }
+  };
 
   // Independent ad playback scheduler + smooth mount/unmount animation states.
   const [adIndex, setAdIndex] = useState(0);
@@ -290,6 +364,10 @@ export default function TvDisplayPage() {
         if (nextServing.length > 0) {
           setPulseServing(true);
           pulseTimerRef.current = setTimeout(() => setPulseServing(false), 2600);
+          if (audioEnabledRef.current) {
+            playChime();
+            announceCallout(nextServing);
+          }
         }
       }, exitMs);
     } catch (e) {
@@ -385,9 +463,29 @@ export default function TvDisplayPage() {
               )}
             </div>
 
-            <div style={{ textAlign: 'right', flex: 'none' }}>
+            <div style={{ textAlign: 'right', flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
               <div style={{ fontSize: 'clamp(18px, 2vw, 24px)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{clock}</div>
-              <div style={{ fontSize: 10.5, color: '#9ca3af', marginTop: 2 }}>Live queue</div>
+              <button
+                type="button"
+                onClick={toggleAudio}
+                style={{
+                  background: audioEnabled ? 'rgba(34, 197, 94, 0.18)' : 'rgba(255, 255, 255, 0.12)',
+                  color: audioEnabled ? '#4ade80' : '#d1d5db',
+                  border: '1px solid ' + (audioEnabled ? 'rgba(34, 197, 94, 0.4)' : 'rgba(255, 255, 255, 0.2)'),
+                  borderRadius: 999,
+                  padding: '3px 9px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  transition: 'all 0.2s ease',
+                }}
+                title={audioEnabled ? 'Mute TV audio' : 'Enable TV chime & speech'}
+              >
+                {audioEnabled ? '🔊 Sound On' : '🔇 Audio Off'}
+              </button>
             </div>
           </header>
 

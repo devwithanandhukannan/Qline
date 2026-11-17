@@ -11,6 +11,8 @@ export const createBookingDto = z
     partySize: z.number().int().min(1).max(50).default(1),
     forName: z.string().trim().max(80).default(''),
     resourceId: objectId.nullable().optional(),
+    guestName: z.string().trim().max(80).optional(),
+    guestPhone: z.string().trim().max(20).optional(),
   })
   .strict()
   .refine((b) => b.type === 'queue' || (b.date && b.slotStart !== undefined), {
@@ -44,7 +46,14 @@ export const reviewDto = z
   })
   .strict();
 
-export const mineQuery = z.object({ scope: z.enum(['active', 'past']).default('active'), page, limit }).strict();
+export const mineQuery = z
+  .object({
+    scope: z.enum(['active', 'past']).default('active'),
+    page,
+    limit,
+    ids: z.string().max(1000).optional(),
+  })
+  .strict();
 
 export const searchQuery = z
   .object({

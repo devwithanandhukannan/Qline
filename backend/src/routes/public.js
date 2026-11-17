@@ -149,7 +149,7 @@ r.get('/shops/:slug/reviews', validate({ params: slugParam, query: reviewsQuery 
   ]);
   res.json({
     total,
-    reviews: rows.map((v) => ({ id: String(v._id), stars: v.stars, comment: v.comment, name: firstName(v.customer?.name), createdAt: v.createdAt })),
+    reviews: rows.map((v) => ({ id: String(v._id), stars: v.stars, comment: v.comment, name: firstName(v.customer?.name || v.guestName || 'Customer'), createdAt: v.createdAt })),
   });
 });
 

@@ -145,8 +145,49 @@ test('validators accept tableDto, tablesDto, allowStaffSelection, allowTableSele
     serviceIds: ['64b1f1f1f1f1f1f1f1f1f101'],
     partySize: 4,
     resourceId: '64b1f1f1f1f1f1f1f1f1f102',
+    guestName: 'Anandhu',
+    guestPhone: '9876543210',
   });
   assert.equal(validBooking.partySize, 4);
   assert.equal(validBooking.resourceId, '64b1f1f1f1f1f1f1f1f1f102');
+  assert.equal(validBooking.guestName, 'Anandhu');
+  assert.equal(validBooking.guestPhone, '9876543210');
 });
+
+test('makeGuestToken and verifyGuestAccess authorize guest access via cookie, header or query', async () => {
+  Object.assign(process.env, {
+    NODE_ENV: 'test',
+    MONGODB_URI: 'mongodb://127.0.0.1/none',
+    MAIL_PROVIDER: 'console',
+    JWT_ACCESS_SECRET: 'a'.repeat(40),
+    JWT_REFRESH_SECRET: 'b'.repeat(40),
+    OTP_PEPPER: 'c'.repeat(40),
+  });
+  const { makeGuestToken, verifyGuestAccess } = await import('../src/routes/bookings.js');
+  const bookingId = '64b1f1f1f1f1f1f1f1f1f105';
+  const validToken = makeGuestToken(bookingId);
+
+  const guestBooking = {
+    _id: bookingId,
+    customer: null,
+    guestName: 'Anandhu',
+  };
+
+  // Header check
+  const reqHeader = { get: (h) => (h === 'x-guest-token' ? validToken : null), query: {}, cookies: {} };
+  assert.equal(verifyGuestAccess(reqHeader, guestBooking), true);
+
+  // Cookie check
+  const reqCookie = { get: () => null, query: {}, cookies: { [`qline_g_${bookingId}`]: validToken } };
+  assert.equal(verifyGuestAccess(reqCookie, guestBooking), true);
+
+  // Query check
+  const reqQuery = { get: () => null, query: { guestToken: validToken }, cookies: {} };
+  assert.equal(verifyGuestAccess(reqQuery, guestBooking), true);
+
+  // Invalid token rejected
+  const reqInvalid = { get: () => 'wrong-token-hash-123', query: {}, cookies: {} };
+  assert.equal(verifyGuestAccess(reqInvalid, guestBooking), false);
+});
+
 

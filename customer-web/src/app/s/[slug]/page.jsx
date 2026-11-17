@@ -59,7 +59,6 @@ export default function ShopPage() {
   const toggle = (id) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
   function start(mode) {
-    if (!user) return setLogin(mode);
     setSheet(mode);
   }
 

@@ -40,6 +40,7 @@ function Ticket() {
   const toast = useToast();
   const [b, setB] = useState(null);
   const [gone, setGone] = useState(false);
+  const [needAuth, setNeedAuth] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [justCancelled, setJustCancelled] = useState(false);
   const [steppingBack, setSteppingBack] = useState(false);
@@ -76,7 +77,8 @@ function Ticket() {
         setPushSubscribed(true);
       }
     } catch (e) {
-      if (e.status === 404) setGone(true);
+      if (e.status === 401) setNeedAuth(true);
+      else if (e.status === 404) setGone(true);
     }
   }, [id]);
 
@@ -248,6 +250,7 @@ function Ticket() {
     }
   }
 
+  if (needAuth) return <LoginGate reason="Sign in to see your booking" fallback={<TicketPassSkeleton />}><Ticket /></LoginGate>;
   if (gone) return <Empty title="Booking not found" action={<Link href="/bookings" className="btn">My bookings</Link>} />;
   if (!b) return <TicketPassSkeleton />;
 
@@ -352,7 +355,7 @@ function Ticket() {
 export default function TicketPage() {
   return (
     <Shell>
-      <LoginGate reason="Sign in to see your booking" fallback={<TicketPassSkeleton />}><Ticket /></LoginGate>
+      <Ticket />
     </Shell>
   );
 }

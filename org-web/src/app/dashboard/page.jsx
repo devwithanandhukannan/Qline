@@ -5,13 +5,34 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Shell, { useShop } from '@/components/Shell';
 import { Button, Empty, Input, Sheet, Switch, cx, useConfirm, useToast } from '@/components/ui';
 import { DashboardSkeleton } from '@/components/Skeletons';
-import { Check, Clock, Phone, Play, Plus, Qr, Users, X } from '@/components/icons';
+import { Check, Clock, Phone, Play, Plus, Qr, Users, WhatsApp, X } from '@/components/icons';
 import { api, ApiError } from '@/lib/api';
 import { mins, time12 } from '@/lib/format';
 
 const STATUS_TEXT = { waiting: 'Waiting', serving: 'In the chair', done: 'Done', no_show: 'No-show', cancelled: 'Cancelled' };
 
-function Row({ b, onAction, busy, busyResourceIds }) {
+function getWhatsAppUrl(b, shopName) {
+  if (!b.phone) return null;
+  let num = b.phone.replace(/[^0-9+]/g, '');
+  if (!num.startsWith('+')) {
+    if (num.length === 10) num = '91' + num;
+  } else {
+    num = num.replace('+', '');
+  }
+
+  let text = '';
+  if (b.status === 'waiting') {
+    text = `Hello ${b.name}, your token #${b.token} at ${shopName || 'our shop'} is coming up soon in the queue. Please arrive at the shop so you don't miss your turn!`;
+  } else if (b.status === 'serving') {
+    text = `Hello ${b.name}, your token #${b.token} is now being called at ${shopName || 'our shop'}${b.resourceName ? ` (${b.resourceName})` : ''}. Please proceed inside!`;
+  } else {
+    text = `Hello ${b.name}, update regarding your visit at ${shopName || 'our shop'} (Token #${b.token}).`;
+  }
+
+  return `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
+}
+
+function Row({ b, onAction, busy, busyResourceIds, shopName }) {
   const live = b.status === 'waiting' || b.status === 'serving';
   const resBusy = b.status === 'waiting' && b.resourceId && busyResourceIds?.has(String(b.resourceId));
   return (
@@ -35,9 +56,28 @@ function Row({ b, onAction, busy, busyResourceIds }) {
         </div>
         <div className="small muted">{b.services.join(', ')} · {mins(b.durationMin)}</div>
         {b.phone && (
-          <a href={`tel:${b.phone}`} className="small row" style={{ gap: 6, width: 'fit-content' }}>
-            <Phone width="14" height="14" /> {b.phone}
-          </a>
+          <div className="row wrap" style={{ gap: 10, alignItems: 'center' }}>
+            <a href={`tel:${b.phone}`} className="small row" style={{ gap: 6, width: 'fit-content' }}>
+              <Phone width="14" height="14" /> {b.phone}
+            </a>
+            <a
+              href={getWhatsAppUrl(b, shopName)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="small row tag"
+              style={{
+                gap: 5,
+                color: '#16a34a',
+                borderColor: 'rgba(22, 163, 74, 0.35)',
+                background: 'rgba(22, 163, 74, 0.08)',
+                textDecoration: 'none',
+                cursor: 'pointer',
+              }}
+              title="Notify customer on WhatsApp"
+            >
+              <WhatsApp width="13" height="13" /> WhatsApp
+            </a>
+          </div>
         )}
         {live && (
           <div className="qactions">
@@ -67,6 +107,7 @@ function Dashboard() {
   const [busy, setBusy] = useState('');
   const [walkin, setWalkin] = useState(false);
   const [late, setLate] = useState(false);
+  const [filterResource, setFilterResource] = useState('all');
   const [welcome, setWelcome] = useState(params.get('welcome') === '1');
   const timer = useRef(null);
 
@@ -156,6 +197,13 @@ function Dashboard() {
   const past = bookings.filter((b) => !['serving', 'waiting'].includes(b.status)).sort((a, b) => b.token - a.token);
   const stateText = status.state === 'open' ? `Open until ${time12(status.closesAt)}` : status.state === 'later' ? 'Opens later today' : status.note || 'Closed today';
 
+  const activeStaff = (shop?.staff || []).filter((s) => s.active);
+  const activeTables = (shop?.tables || []).filter((t) => t.active);
+  const resources = [...activeStaff, ...activeTables];
+  const displayLive = filterResource === 'all'
+    ? live
+    : live.filter((b) => !b.resourceId || String(b.resourceId) === filterResource);
+
   return (
     <div className="stack-lg">
       <div className="stack">
@@ -212,15 +260,41 @@ function Dashboard() {
 
       <section className="stack-sm">
         <div className="section-title">Queue · {live.length}</div>
-        {live.length === 0 ? (
+        {resources.length > 0 && (
+          <div className="row wrap" style={{ gap: 6, margin: '2px 0 8px' }}>
+            <button
+              type="button"
+              className={cx('tag', filterResource === 'all' && 'accent')}
+              onClick={() => setFilterResource('all')}
+              style={{ cursor: 'pointer', padding: '5px 12px', borderRadius: 999 }}
+            >
+              All ({live.length})
+            </button>
+            {resources.map((res) => {
+              const resCount = live.filter((b) => !b.resourceId || String(b.resourceId) === String(res._id)).length;
+              return (
+                <button
+                  type="button"
+                  key={res._id}
+                  className={cx('tag', filterResource === String(res._id) && 'accent')}
+                  onClick={() => setFilterResource(String(res._id))}
+                  style={{ cursor: 'pointer', padding: '5px 12px', borderRadius: 999 }}
+                >
+                  {res.capacity ? `🍽️ ${res.name}` : `✂️ ${res.name}`} ({resCount})
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {displayLive.length === 0 ? (
           <div className="list">
-            <Empty icon={<Users />} title="Nobody waiting" action={<Link href="/settings#qr" className="btn secondary sm"><Qr width="16" height="16" /> Show my QR code</Link>}>
-              Stick your QR code on the wall so customers can join the queue. Walk-ins can be added with the button above.
+            <Empty icon={<Users />} title={filterResource === 'all' ? 'Nobody waiting' : 'Nobody waiting here'} action={<Link href="/settings#qr" className="btn secondary sm"><Qr width="16" height="16" /> Show my QR code</Link>}>
+              {filterResource === 'all' ? 'Stick your QR code on the wall so customers can join the queue. Walk-ins can be added with the button above.' : 'No active customers assigned to this chair or table right now.'}
             </Empty>
           </div>
         ) : (
           <div className="list">
-            {live.map((b) => <Row key={b.id} b={b} onAction={act} busy={busy} busyResourceIds={busyResourceIds} />)}
+            {displayLive.map((b) => <Row key={b.id} b={b} onAction={act} busy={busy} busyResourceIds={busyResourceIds} shopName={shop?.name} />)}
           </div>
         )}
       </section>
@@ -228,7 +302,7 @@ function Dashboard() {
       {past.length > 0 && (
         <section className="stack-sm">
           <div className="section-title">Finished · {past.length}</div>
-          <div className="list">{past.map((b) => <Row key={b.id} b={b} onAction={act} busy={busy} busyResourceIds={busyResourceIds} />)}</div>
+          <div className="list">{past.map((b) => <Row key={b.id} b={b} onAction={act} busy={busy} busyResourceIds={busyResourceIds} shopName={shop?.name} />)}</div>
         </section>
       )}
 

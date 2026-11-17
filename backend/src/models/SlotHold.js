@@ -5,7 +5,8 @@ const { Schema } = mongoose;
 const slotHoldSchema = new Schema(
   {
     shop: { type: Schema.Types.ObjectId, ref: 'Shop', required: true, index: true },
-    customer: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    customer: { type: Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    guestId: { type: String, default: null, index: true },
     date: { type: String, required: true },
     slotStart: { type: Number, required: true },
     durationMin: { type: Number, required: true },

@@ -1,23 +1,47 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import { SlotHold } from '../models/SlotHold.js';
 import { holdSlotDto } from '../validators/booking.js';
-import { validate, requireAuth } from '../middleware/core.js';
+import { validate, optionalAuth, cookieOpts } from '../middleware/core.js';
 import { idParam } from '../validators/common.js';
 import { createBookingDto, reviewDto, mineQuery, pushSubscriptionDto, pushDeleteDto } from '../validators/booking.js';
 import { Shop } from '../models/Shop.js';
 import { Booking } from '../models/Booking.js';
 import { Counter } from '../models/Counter.js';
 import { Review } from '../models/Review.js';
-import { notFound, conflict, badRequest, forbidden, AppError } from '../utils/errors.js';
+import { notFound, conflict, badRequest, forbidden, unauthorized, AppError } from '../utils/errors.js';
 import { nowInZone, daysBetween } from '../utils/time.js';
 import { queueDecision, positionOf } from '../services/queue.js';
 import { canTakeSlot, capacityOn, buildSlots, openStatus } from '../services/schedule.js';
 import { presentBooking } from '../services/present.js';
 import { notifyQueueTurnUpdates } from '../services/webPush.js';
 import { withDistributedLock, withMemoryLock } from '../utils/lock.js';
+import { env } from '../config/env.js';
 
 const r = Router();
-r.use((req, res, next) => requireAuth('customer')(req, res, next));
+r.use((req, res, next) => optionalAuth('customer')(req, res, next));
+
+export function makeGuestToken(bookingId) {
+  return crypto.createHmac('sha256', env.JWT_ACCESS_SECRET).update(String(bookingId)).digest('hex');
+}
+
+export function verifyGuestAccess(req, b) {
+  if (req.user && b.customer && String(b.customer) === String(req.user._id)) {
+    return true;
+  }
+  if (!b.customer || b.guestName) {
+    const provided = req.get('x-guest-token') || req.query?.guestToken || req.cookies?.[`qline_g_${b._id}`];
+    if (provided) {
+      const expected = makeGuestToken(b._id);
+      const bufA = Buffer.from(String(provided));
+      const bufB = Buffer.from(expected);
+      if (bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 const HOLD_MS = 2 * 60 * 1000;
 
@@ -37,24 +61,34 @@ r.post('/hold-slot', validate({ body: holdSlotDto }), async (req, res) => {
   const nowDate = new Date();
   const expiresAt = new Date(nowDate.getTime() + HOLD_MS);
 
-  const hold = await withDistributedLock([`cust:${req.user._id}`, `shop:${shop._id}:${date}`], async () => {
+  const customerId = req.user?._id || null;
+  const guestIdentifier = !customerId ? (req.ip || 'guest') : null;
+  const lockKey = customerId ? `cust:${customerId}` : `guest:${guestIdentifier}`;
+
+  const hold = await withDistributedLock([lockKey, `shop:${shop._id}:${date}`], async () => {
     const [dayBookings, activeHolds] = await Promise.all([
       Booking.find({ shop: shop._id, date, type: 'slot', status: { $in: ['waiting', 'serving', 'done'] } })
         .select('type status durationMin slotStart resourceId')
         .lean(),
       SlotHold.find({ shop: shop._id, date, expiresAt: { $gt: nowDate } })
-        .select('customer slotStart durationMin resourceId')
+        .select('customer guestId slotStart durationMin resourceId')
         .lean(),
     ]);
 
-    if (!canTakeSlot(shop, date, slotStart, durationMin, dayBookings, now, activeHolds, req.user._id, resourceId, partySize)) {
+    if (!canTakeSlot(shop, date, slotStart, durationMin, dayBookings, now, activeHolds, customerId, resourceId, partySize)) {
       throw new AppError(409, 'That time was just taken. Please pick another slot.', 'slot_taken');
     }
 
-    await SlotHold.deleteMany({ customer: req.user._id, shop: shop._id });
+    if (customerId) {
+      await SlotHold.deleteMany({ customer: customerId, shop: shop._id });
+    } else {
+      await SlotHold.deleteMany({ guestId: guestIdentifier, shop: shop._id });
+    }
+
     return SlotHold.create({
       shop: shop._id,
-      customer: req.user._id,
+      customer: customerId,
+      guestId: guestIdentifier,
       date,
       slotStart,
       durationMin,
@@ -77,7 +111,7 @@ r.post('/hold-slot', validate({ body: holdSlotDto }), async (req, res) => {
 
 /** Release any active slot holds belonging to the current customer (optionally scoped to one shop). */
 r.delete('/hold-slot', async (req, res) => {
-  const filter = { customer: req.user._id };
+  const filter = req.user ? { customer: req.user._id } : { guestId: req.ip || 'guest' };
   if (req.query.slug) {
     const shop = await Shop.findOne({ slug: String(req.query.slug) }).select('_id').lean();
     if (shop) filter.shop = shop._id;
@@ -94,7 +128,12 @@ async function nextToken(shopId, date) {
 }
 
 r.post('/', validate({ body: createBookingDto }), async (req, res) => {
-  const { slug, type, serviceIds, slotStart, partySize, forName, resourceId } = req.valid.body;
+  const { slug, type, serviceIds, slotStart, partySize, forName, resourceId, guestName, guestPhone } = req.valid.body;
+  const user = req.user;
+  if (!user && (!guestName || guestName.trim().length < 2)) {
+    throw unauthorized('Please sign in or enter your name to book', 'no_session');
+  }
+
   const shop = await Shop.findOne({ slug }).lean();
   if (!shop) throw notFound('Shop not found');
   if (shop.isActive === false) throw forbidden('This shop is temporarily turned off by administrator.', 'shop_disabled');
@@ -125,19 +164,33 @@ r.post('/', validate({ body: createBookingDto }), async (req, res) => {
 
   const now = nowInZone(shop.timezone);
   const date = type === 'queue' ? now.date : req.valid.body.date;
-  const cleanFor = forName.trim();
+  const cleanGuestName = guestName ? guestName.trim() : '';
+  const cleanGuestPhone = guestPhone ? guestPhone.trim() : '';
+  const cleanFor = forName ? forName.trim() : (user ? '' : cleanGuestName);
   const sameRecipient = (m) => (m.forName || '').trim().toLowerCase() === cleanFor.toLowerCase();
 
-  const booking = await withDistributedLock([`cust:${req.user._id}`, `shop:${shop._id}:${date}`], async () => {
-    const mine = await Booking.find({ customer: req.user._id, status: { $in: ['waiting', 'serving'] }, date: { $gte: now.date } })
-      .select('shop date type slotStart forName')
-      .lean();
-    if (mine.length >= MAX_ACTIVE) throw conflict(`You already have ${MAX_ACTIVE} active bookings. Finish or cancel one first.`, 'too_many_active');
-    if (type === 'queue' && mine.some((m) => String(m.shop) === String(shop._id) && m.date === date && m.type === 'queue' && sameRecipient(m))) {
-      throw conflict(cleanFor ? `You already have a queue booking for ${cleanFor}.` : 'You are already in this queue.', 'already_queued');
-    }
-    if (type === 'slot' && mine.some((m) => String(m.shop) === String(shop._id) && m.date === date && m.slotStart === slotStart && sameRecipient(m))) {
-      throw conflict(cleanFor ? `You already booked this slot for ${cleanFor}.` : 'You already booked this slot.', 'already_booked');
+  const lockKey = user ? `cust:${user._id}` : `guest:${cleanGuestPhone || req.ip}`;
+
+  const booking = await withDistributedLock([lockKey, `shop:${shop._id}:${date}`], async () => {
+    if (user) {
+      const mine = await Booking.find({ customer: user._id, status: { $in: ['waiting', 'serving'] }, date: { $gte: now.date } })
+        .select('shop date type slotStart forName')
+        .lean();
+      if (mine.length >= MAX_ACTIVE) throw conflict(`You already have ${MAX_ACTIVE} active bookings. Finish or cancel one first.`, 'too_many_active');
+      if (type === 'queue' && mine.some((m) => String(m.shop) === String(shop._id) && m.date === date && m.type === 'queue' && sameRecipient(m))) {
+        throw conflict(cleanFor ? `You already have a queue booking for ${cleanFor}.` : 'You are already in this queue.', 'already_queued');
+      }
+      if (type === 'slot' && mine.some((m) => String(m.shop) === String(shop._id) && m.date === date && m.slotStart === slotStart && sameRecipient(m))) {
+        throw conflict(cleanFor ? `You already booked this slot for ${cleanFor}.` : 'You already booked this slot.', 'already_booked');
+      }
+    } else if (cleanGuestPhone) {
+      const activeForPhone = await Booking.countDocuments({
+        shop: shop._id,
+        date,
+        guestPhone: cleanGuestPhone,
+        status: { $in: ['waiting', 'serving'] },
+      });
+      if (activeForPhone >= 3) throw conflict('You already have active bookings for this phone number today.', 'already_queued');
     }
 
     const dayBookings = await Booking.find({ shop: shop._id, date, status: { $in: ['waiting', 'serving', 'done'] } })
@@ -150,18 +203,24 @@ r.post('/', validate({ body: createBookingDto }), async (req, res) => {
     } else {
       if (!shop.settings.acceptSlots) throw new AppError(409, 'This shop does not take slot bookings.', 'slots_unavailable');
       const activeHolds = await SlotHold.find({ shop: shop._id, date, expiresAt: { $gt: new Date() } })
-        .select('customer slotStart durationMin resourceId')
+        .select('customer guestId slotStart durationMin resourceId')
         .lean();
-      if (!canTakeSlot(shop, date, slotStart, durationMin, dayBookings, now, activeHolds, req.user._id, resourceId, partySize)) {
+      if (!canTakeSlot(shop, date, slotStart, durationMin, dayBookings, now, activeHolds, user?._id || null, resourceId, partySize)) {
         throw new AppError(409, 'That time was just taken or your reservation expired. Please pick another slot.', 'slot_taken');
       }
-      await SlotHold.deleteMany({ customer: req.user._id, shop: shop._id });
+      if (user) {
+        await SlotHold.deleteMany({ customer: user._id, shop: shop._id });
+      } else {
+        await SlotHold.deleteMany({ guestId: req.ip || 'guest', shop: shop._id });
+      }
     }
 
     const token = await nextToken(shop._id, date);
     return Booking.create({
       shop: shop._id,
-      customer: req.user._id,
+      customer: user ? user._id : null,
+      guestName: user ? '' : cleanGuestName,
+      guestPhone: user ? '' : cleanGuestPhone,
       date,
       type,
       token,
@@ -185,24 +244,49 @@ r.post('/', validate({ body: createBookingDto }), async (req, res) => {
   if (booking.type === 'queue') {
     notifyQueueTurnUpdates(shop, date).catch(() => {});
   }
-  res.status(201).json({ booking: presentBooking(booking) });
+
+  const guestToken = makeGuestToken(booking._id);
+  res.cookie(`qline_g_${booking._id}`, guestToken, cookieOpts(30 * 24 * 60 * 60 * 1000));
+  res.status(201).json({ booking: presentBooking(booking), guestToken });
 });
 
 r.get('/mine', validate({ query: mineQuery }), async (req, res) => {
-  const { scope, page, limit } = req.valid.query;
+  const { scope, page, limit, ids } = req.valid.query;
   const tzNow = (tz) => nowInZone(tz || 'Asia/Kolkata').date;
   const today = tzNow();
-  const filter =
-    scope === 'active'
-      ? { customer: req.user._id, status: { $in: ['waiting', 'serving'] }, date: { $gte: today } }
-      : { customer: req.user._id, $or: [{ status: { $in: ['done', 'no_show', 'cancelled'] } }, { date: { $lt: today } }] };
+
+  let filter;
+  if (req.user) {
+    filter =
+      scope === 'active'
+        ? { customer: req.user._id, status: { $in: ['waiting', 'serving'] }, date: { $gte: today } }
+        : { customer: req.user._id, $or: [{ status: { $in: ['done', 'no_show', 'cancelled'] } }, { date: { $lt: today } }] };
+  } else if (ids) {
+    const validIds = ids
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => /^[a-f\d]{24}$/i.test(s))
+      .slice(0, 20);
+    if (!validIds.length) return res.json({ total: 0, bookings: [] });
+
+    filter =
+      scope === 'active'
+        ? { _id: { $in: validIds }, status: { $in: ['waiting', 'serving'] }, date: { $gte: today } }
+        : { _id: { $in: validIds }, $or: [{ status: { $in: ['done', 'no_show', 'cancelled'] } }, { date: { $lt: today } }] };
+  } else {
+    return res.json({ total: 0, bookings: [] });
+  }
+
   const [rows, total] = await Promise.all([
     Booking.find(filter).sort({ date: scope === 'active' ? 1 : -1, createdAt: -1 }).skip((page - 1) * limit).limit(limit).populate('shop', 'name slug area city').lean(),
     Booking.countDocuments(filter),
   ]);
+
+  const authorizedRows = req.user ? rows : rows.filter((b) => verifyGuestAccess(req, b));
+
   res.json({
-    total,
-    bookings: rows.map((b) => presentBooking(b, { shop: b.shop ? { name: b.shop.name, slug: b.shop.slug, area: b.shop.area, city: b.shop.city } : null })),
+    total: req.user ? total : authorizedRows.length,
+    bookings: authorizedRows.map((b) => presentBooking(b, { shop: b.shop ? { name: b.shop.name, slug: b.shop.slug, area: b.shop.area, city: b.shop.city } : null })),
   });
 });
 
@@ -228,24 +312,23 @@ async function hydrateBooking(b, shop) {
 
 r.get('/:id', validate({ params: idParam }), async (req, res) => {
   const b = await Booking.findById(req.valid.params.id).lean();
-  if (!b || String(b.customer) !== String(req.user._id)) throw notFound('Booking not found');
+  if (!b || !verifyGuestAccess(req, b)) throw notFound('Booking not found');
   const shop = await Shop.findById(b.shop).lean();
   if (!shop) throw notFound('Shop not found');
   res.json({ booking: await hydrateBooking(b, shop) });
 });
 
 r.post('/:id/cancel', validate({ params: idParam }), async (req, res) => {
-  const updated = await Booking.findOneAndUpdate(
-    { _id: req.valid.params.id, customer: req.user._id, status: 'waiting' },
+  const existing = await Booking.findById(req.valid.params.id).lean();
+  if (!existing || !verifyGuestAccess(req, existing)) throw notFound('Booking not found');
+  if (existing.status !== 'waiting') throw conflict('This booking can no longer be cancelled.');
+
+  const updated = await Booking.findByIdAndUpdate(
+    existing._id,
     { $set: { status: 'cancelled' } },
     { returnDocument: 'after' }
   );
-  if (!updated) {
-    const existing = await Booking.findById(req.valid.params.id).select('customer').lean();
-    if (!existing || String(existing.customer) !== String(req.user._id)) throw notFound('Booking not found');
-    throw conflict('This booking can no longer be cancelled.');
-  }
-  if (updated.type === 'queue') {
+  if (updated && updated.type === 'queue') {
     const shop = await Shop.findById(updated.shop).lean();
     if (shop) notifyQueueTurnUpdates(shop, updated.date).catch(() => {});
   }
@@ -253,8 +336,8 @@ r.post('/:id/cancel', validate({ params: idParam }), async (req, res) => {
 });
 
 r.post('/:id/step-back', validate({ params: idParam }), async (req, res) => {
-  const target = await Booking.findById(req.valid.params.id).select('shop date customer type resourceId').lean();
-  if (!target || String(target.customer) !== String(req.user._id)) throw notFound('Booking not found');
+  const target = await Booking.findById(req.valid.params.id).select('shop date customer type resourceId guestName').lean();
+  if (!target || !verifyGuestAccess(req, target)) throw notFound('Booking not found');
   if (target.type !== 'queue') throw badRequest('Only live queue bookings can step back.');
 
   const shop = await Shop.findById(target.shop).lean();
@@ -294,7 +377,7 @@ r.post('/:id/step-back', validate({ params: idParam }), async (req, res) => {
 
 r.post('/:id/push', validate({ params: idParam, body: pushSubscriptionDto }), async (req, res) => {
   const b = await Booking.findById(req.valid.params.id);
-  if (!b || String(b.customer) !== String(req.user._id)) throw notFound('Booking not found');
+  if (!b || !verifyGuestAccess(req, b)) throw notFound('Booking not found');
   const sub = req.valid.body;
   const rest = (b.pushSubscriptions || []).filter((s) => s.endpoint !== sub.endpoint).slice(-2);
   b.pushSubscriptions = [...rest, sub];
@@ -308,7 +391,7 @@ r.post('/:id/push', validate({ params: idParam, body: pushSubscriptionDto }), as
 
 r.delete('/:id/push', validate({ params: idParam, body: pushDeleteDto }), async (req, res) => {
   const b = await Booking.findById(req.valid.params.id);
-  if (!b || String(b.customer) !== String(req.user._id)) throw notFound('Booking not found');
+  if (!b || !verifyGuestAccess(req, b)) throw notFound('Booking not found');
   const { endpoint } = req.valid.body;
   b.pushSubscriptions = endpoint ? (b.pushSubscriptions || []).filter((s) => s.endpoint !== endpoint) : [];
   await b.save();
@@ -316,20 +399,25 @@ r.delete('/:id/push', validate({ params: idParam, body: pushDeleteDto }), async 
 });
 
 r.post('/:id/review', validate({ params: idParam, body: reviewDto }), async (req, res) => {
-  const b = await Booking.findOneAndUpdate(
-    { _id: req.valid.params.id, customer: req.user._id, status: 'done', reviewed: false },
-    { $set: { reviewed: true } },
-    { returnDocument: 'after' }
-  );
-  if (!b) {
-    const existing = await Booking.findById(req.valid.params.id).select('customer status reviewed').lean();
-    if (!existing || String(existing.customer) !== String(req.user._id)) throw notFound('Booking not found');
-    if (existing.status !== 'done') throw forbidden('You can rate a visit after it is completed.');
-    throw conflict('You already rated this visit.');
-  }
+  const b = await Booking.findById(req.valid.params.id);
+  if (!b || !verifyGuestAccess(req, b)) throw notFound('Booking not found');
+  if (b.status !== 'done') throw forbidden('You can rate a visit after it is completed.');
+  if (b.reviewed) throw conflict('You already rated this visit.');
+
+  b.reviewed = true;
+  await b.save();
+
   const { stars, comment, isPublic } = req.valid.body;
   try {
-    await Review.create({ shop: b.shop, customer: req.user._id, booking: b._id, stars, comment, isPublic: comment ? isPublic : true });
+    await Review.create({
+      shop: b.shop,
+      customer: b.customer || null,
+      guestName: b.guestName || '',
+      booking: b._id,
+      stars,
+      comment,
+      isPublic: comment ? isPublic : true,
+    });
   } catch (err) {
     await Booking.updateOne({ _id: b._id }, { $set: { reviewed: false } }).catch(() => {});
     throw err;

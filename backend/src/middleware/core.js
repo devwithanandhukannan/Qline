@@ -54,6 +54,23 @@ export function requireAuth(role) {
   };
 }
 
+export function optionalAuth(role) {
+  return async (req, _res, next) => {
+    try {
+      const cName = req.qapp && cookieNames(req.qapp)?.access;
+      const token = cName ? req.cookies?.[cName] : undefined;
+      const payload = token && verifyAccess(token);
+      if (payload && payload.role === role && APP_ROLE[req.qapp] === role) {
+        const user = await User.findById(payload.sub).lean();
+        if (user) req.user = user;
+      }
+    } catch {
+      // Continue without user
+    }
+    next();
+  };
+}
+
 export function notFoundHandler(_req, _res, next) {
   next(new AppError(404, 'Not found', 'not_found'));
 }
