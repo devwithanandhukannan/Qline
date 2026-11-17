@@ -271,13 +271,14 @@ function Dashboard() {
               All ({live.length})
             </button>
             {resources.map((res) => {
-              const resCount = live.filter((b) => !b.resourceId || String(b.resourceId) === String(res._id)).length;
+              const resId = String(res.id || res._id);
+              const resCount = live.filter((b) => !b.resourceId || String(b.resourceId) === resId).length;
               return (
                 <button
                   type="button"
-                  key={res._id}
-                  className={cx('tag', filterResource === String(res._id) && 'accent')}
-                  onClick={() => setFilterResource(String(res._id))}
+                  key={resId}
+                  className={cx('tag', filterResource === resId && 'accent')}
+                  onClick={() => setFilterResource(resId)}
                   style={{ cursor: 'pointer', padding: '5px 12px', borderRadius: 999 }}
                 >
                   {res.capacity ? `🍽️ ${res.name}` : `✂️ ${res.name}`} ({resCount})
