@@ -329,11 +329,11 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
           )}
         </div>
 
-        {shop.settings?.allowStaffSelection && (shop.staff || []).length > 0 && (
+        {shop.category !== 'cafe' && shop.settings?.allowStaffSelection && (shop.staff || []).length > 0 && (
           <div className="card stack-sm" style={{ padding: '14px 16px' }}>
             <div className="row between" style={{ gap: 8 }}>
               <div>
-                <b style={{ fontSize: 14 }}>Choose Stylist</b>
+                <b style={{ fontSize: 14 }}>Choose {shop.category === 'clinic' ? 'Doctor' : 'Stylist'}</b>
                 <div className="small muted">First Available gets you served fastest</div>
               </div>
             </div>
@@ -382,7 +382,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
           </div>
         )}
 
-        {shop.settings?.allowTableSelection && (shop.tables || []).length > 0 && (() => {
+        {shop.category === 'cafe' && shop.settings?.allowTableSelection && (shop.tables || []).length > 0 && (() => {
           const matching = (shop.tables || []).filter((t) => t.active && t.capacity >= count);
           return (
             <div className="card stack-sm" style={{ padding: '14px 16px' }}>

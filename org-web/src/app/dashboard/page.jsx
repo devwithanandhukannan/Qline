@@ -198,9 +198,10 @@ function Dashboard() {
   const past = bookings.filter((b) => !['serving', 'waiting'].includes(b.status)).sort((a, b) => b.token - a.token);
   const stateText = status.state === 'open' ? `Open until ${time12(status.closesAt)}` : status.state === 'later' ? 'Opens later today' : status.note || 'Closed today';
 
+  const isCafe = shop?.category === 'cafe';
   const activeStaff = (shop?.staff || []).filter((s) => s.active);
   const activeTables = (shop?.tables || []).filter((t) => t.active);
-  const resources = [...activeStaff, ...activeTables];
+  const resources = isCafe ? activeTables : activeStaff;
   const displayLive = filterResource === 'all'
     ? live
     : live.filter((b) => !b.resourceId || String(b.resourceId) === filterResource);

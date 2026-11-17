@@ -16,16 +16,7 @@ import { PwaInstallCard } from '@/components/Pwa';
 const CUSTOMER_URL = (process.env.NEXT_PUBLIC_CUSTOMER_URL || 'http://localhost:3000').replace(/\/$/, '');
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const SECTIONS = [
-  ['profile', 'Profile'],
-  ['services', 'Services'],
-  ['hours', 'Hours'],
-  ['staff', 'Staff'],
-  ['tables', 'Tables'],
-  ['rules', 'Rules'],
-  ['qr', 'QR code'],
-  ['account', 'Account'],
-];
+
 
 function useSave(reload) {
   const toast = useToast();
@@ -464,13 +455,23 @@ function Rules({ shop, reload }) {
     run(() => api('/org/shop/settings', { method: 'PUT', body: { enableTvScreen: v } }));
   }
 
+  const isCafe = shop.category === 'cafe';
+  const staffLabel = shop.category === 'clinic' ? 'doctors' : 'staff / stylist';
+  const staffDesc = shop.category === 'clinic'
+    ? 'Customers can select a specific doctor or choose First Available for the shortest wait.'
+    : 'Customers can select a specific stylist or choose First Available for the shortest wait.';
+
   return (
     <div className="stack">
       <div className="list">
         <div className="item"><div className="grow"><b>Live queue</b><div className="small muted">Customers join today and see their turn live. Best for walk-in shops.</div></div><Switch checked={s.acceptQueue} onChange={(v) => setS({ ...s, acceptQueue: v })} label="Live queue" /></div>
         <div className="item"><div className="grow"><b>Slot booking</b><div className="small muted">Customers pick a time, today or in the coming days.</div></div><Switch checked={s.acceptSlots} onChange={(v) => setS({ ...s, acceptSlots: v })} label="Slot booking" /></div>
-        <div className="item"><div className="grow"><b>Allow customers to choose staff / stylist</b><div className="small muted">Customers can select a specific stylist or choose First Available for the shortest wait.</div></div><Switch checked={s.allowStaffSelection} onChange={(v) => setS({ ...s, allowStaffSelection: v })} label="Allow staff selection" /></div>
-        <div className="item"><div className="grow"><b>Enable table selection (for cafes / dining)</b><div className="small muted">Customers choose a table filtered by party size or choose First Available table.</div></div><Switch checked={s.allowTableSelection} onChange={(v) => setS({ ...s, allowTableSelection: v })} label="Enable table selection" /></div>
+        {!isCafe && (
+          <div className="item"><div className="grow"><b>Allow customers to choose {staffLabel}</b><div className="small muted">{staffDesc}</div></div><Switch checked={s.allowStaffSelection} onChange={(v) => setS({ ...s, allowStaffSelection: v })} label={`Allow ${staffLabel} selection`} /></div>
+        )}
+        {isCafe && (
+          <div className="item"><div className="grow"><b>Enable table selection (for cafes / dining)</b><div className="small muted">Customers choose a table filtered by party size or choose First Available table.</div></div><Switch checked={s.allowTableSelection} onChange={(v) => setS({ ...s, allowTableSelection: v })} label="Enable table selection" /></div>
+        )}
         <div className="item"><div className="grow"><b>Live TV / Counter display (optional)</b><div className="small muted">Public fullscreen screen showing Now Serving &amp; Up Next on a shop TV or tablet.</div></div><Switch checked={s.enableTvScreen} onChange={toggleTv} label="Live TV display" /></div>
       </div>
       {s.enableTvScreen && (
@@ -569,15 +570,34 @@ function Settings() {
   const [tab, setTab] = useState('profile');
   const top = useRef(null);
 
+  const isCafe = shop?.category === 'cafe';
+  const staffTitle = shop?.category === 'clinic' ? 'Doctors' : 'Staff';
+
+  const sections = [
+    ['profile', 'Profile'],
+    ['services', 'Services'],
+    ['hours', 'Hours'],
+    !isCafe && ['staff', staffTitle],
+    isCafe && ['tables', 'Tables'],
+    ['rules', 'Rules'],
+    ['qr', 'QR code'],
+    ['account', 'Account'],
+  ].filter(Boolean);
+
   useEffect(() => {
     const fromHash = () => {
       const h = window.location.hash.replace('#', '');
-      if (SECTIONS.some(([id]) => id === h)) setTab(h);
+      if (sections.some(([id]) => id === h)) setTab(h);
     };
     fromHash();
     window.addEventListener('hashchange', fromHash);
     return () => window.removeEventListener('hashchange', fromHash);
-  }, []);
+  }, [sections]);
+
+  useEffect(() => {
+    if (!isCafe && tab === 'tables') setTab('profile');
+    if (isCafe && tab === 'staff') setTab('profile');
+  }, [isCafe, tab]);
 
   const go = useCallback((id) => {
     setTab(id);
@@ -592,8 +612,8 @@ function Settings() {
     profile: <Profile key="p" shop={shop} reload={reload} />,
     services: <Services key="s" shop={shop} reload={reload} />,
     hours: <Hours key="h" shop={shop} reload={reload} />,
-    staff: <Staff key="st" shop={shop} reload={reload} />,
-    tables: <Tables key="tb" shop={shop} reload={reload} />,
+    staff: !isCafe ? <Staff key="st" shop={shop} reload={reload} /> : null,
+    tables: isCafe ? <Tables key="tb" shop={shop} reload={reload} /> : null,
     rules: <Rules key="r" shop={shop} reload={reload} />,
     qr: <QrBlock key="q" shop={shop} />,
     account: <Account key="a" />,
@@ -603,7 +623,7 @@ function Settings() {
     <div className="stack-lg" style={{ maxWidth: 680, margin: '0 auto' }} ref={top}>
       <h1 className="enter no-print">Settings</h1>
       <div className="hscroll nav-seg no-print" role="tablist" aria-label="Settings sections">
-        {SECTIONS.map(([id, label]) => (
+        {sections.map(([id, label]) => (
           <button key={id} role="tab" aria-selected={tab === id} className={cx('chip', tab === id && 'on')} onClick={() => go(id)}>{label}</button>
         ))}
       </div>
