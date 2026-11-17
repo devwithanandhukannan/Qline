@@ -48,8 +48,8 @@ export async function presentShop(shop, { withQueue = true, resourceId = null } 
     images: shop.images || [],
     rating: { avg: Math.round(shop.ratingAvg * 10) / 10, count: shop.ratingCount },
     services: (shop.services || []).filter((s) => s.active).map(publicService),
-    staff: (shop.staff || []).filter((s) => s.active).map(publicStaff),
-    tables: (shop.tables || []).filter((t) => t.active).map(publicTable),
+    staff: shop.category !== 'cafe' ? (shop.staff || []).filter((s) => s.active).map(publicStaff) : [],
+    tables: shop.category === 'cafe' ? (shop.tables || []).filter((t) => t.active).map(publicTable) : [],
     settings: {
       acceptQueue: shop.settings.acceptQueue,
       acceptSlots: shop.settings.acceptSlots,
@@ -57,8 +57,8 @@ export async function presentShop(shop, { withQueue = true, resourceId = null } 
       advanceDays: shop.settings.advanceDays,
       maxQueue: shop.settings.maxQueue,
       graceMin: shop.settings.graceMin,
-      allowStaffSelection: !!shop.settings.allowStaffSelection,
-      allowTableSelection: !!shop.settings.allowTableSelection,
+      allowStaffSelection: shop.category !== 'cafe' && !!shop.settings.allowStaffSelection,
+      allowTableSelection: shop.category === 'cafe' && !!shop.settings.allowTableSelection,
     },
     today: {
       date: now.date,

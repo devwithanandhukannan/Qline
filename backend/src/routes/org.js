@@ -56,8 +56,8 @@ const presentOwnerShop = (s) => ({
   disabledAt: s.disabledAt || null,
   images: s.images || [],
   services: s.services.map((x) => ({ id: String(x._id), name: x.name, durationMin: x.durationMin, price: x.price, active: x.active })),
-  staff: s.staff.map((x) => ({ id: String(x._id), name: x.name, active: x.active, offDays: x.offDays, offDates: x.offDates })),
-  tables: (s.tables || []).map((x) => ({ id: String(x._id), name: x.name, capacity: x.capacity, active: x.active })),
+  staff: s.category !== 'cafe' ? s.staff.map((x) => ({ id: String(x._id), name: x.name, active: x.active, offDays: x.offDays, offDates: x.offDates })) : [],
+  tables: s.category === 'cafe' ? (s.tables || []).map((x) => ({ id: String(x._id), name: x.name, capacity: x.capacity, active: x.active })) : [],
   weekly: [...s.weekly].sort((a, b) => a.day - b.day).map((d) => ({ day: d.day, open: d.open, intervals: d.intervals.map((i) => ({ start: i.start, end: i.end })) })),
   overrides: [...s.overrides].sort((a, b) => a.date.localeCompare(b.date)).map((o) => ({ date: o.date, closed: o.closed, note: o.note, intervals: o.intervals.map((i) => ({ start: i.start, end: i.end })) })),
   settings: s.settings.toObject ? s.settings.toObject() : s.settings,
@@ -116,6 +116,11 @@ r.post('/shop', validate({ body: D.createShopDto }), async (req, res) => {
 
 r.put('/shop', withShop, validate({ body: D.updateShopDto }), async (req, res) => {
   Object.assign(req.shop, req.valid.body);
+  if (req.shop.category !== 'cafe') {
+    req.shop.settings.allowTableSelection = false;
+  } else {
+    req.shop.settings.allowStaffSelection = false;
+  }
   await req.shop.save();
   res.json({ shop: presentOwnerShop(req.shop) });
 });
@@ -138,6 +143,11 @@ r.put('/shop/schedule', withShop, validate({ body: D.scheduleDto }), async (req,
 r.put('/shop/settings', withShop, validate({ body: D.settingsDto }), async (req, res) => {
   for (const [k, v] of Object.entries(req.valid.body)) req.shop.settings[k] = v;
   if (!req.shop.settings.acceptQueue && !req.shop.settings.acceptSlots) throw badRequest('Turn on at least queue or slot booking.');
+  if (req.shop.category !== 'cafe') {
+    req.shop.settings.allowTableSelection = false;
+  } else {
+    req.shop.settings.allowStaffSelection = false;
+  }
   await req.shop.save();
   res.json({ shop: presentOwnerShop(req.shop) });
 });
