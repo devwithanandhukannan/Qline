@@ -120,7 +120,7 @@ function useExit(open, ms = 220) {
   return { mounted, out };
 }
 
-function Layer({ open, onClose, sheet, title, children, label }) {
+function Layer({ open, onClose, sheet, title, children, label, footer }) {
   const { mounted, out } = useExit(open);
   const ref = useRef(null);
   useEffect(() => {
@@ -149,6 +149,7 @@ function Layer({ open, onClose, sheet, title, children, label }) {
             <button className="btn icon secondary" onClick={onClose} aria-label="Close"><X width="18" height="18" /></button>
           </div>
           <div className="sheet-body">{children}</div>
+          {footer && <div className="sheet-footer">{footer}</div>}
         </div>
       ) : (
         <div className="modal" role="alertdialog" aria-modal="true" aria-label={label || title} ref={ref}>{children}</div>

@@ -247,8 +247,33 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
   const dates = Array.from({ length: advanceDays + 1 }, (_, i) => addDaysStr(shop.today.date, i));
   const timerLabel = `${String(Math.floor(holdSec / 60)).padStart(2, '0')}:${String(holdSec % 60).padStart(2, '0')}`;
 
+  const footerContent = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {error && <p className="err-text center" role="alert" style={{ margin: '0 0 2px', fontSize: 13 }}>{error}</p>}
+      <Button
+        block
+        loading={busy || holding}
+        onClick={book}
+        disabled={
+          (mode === 'slot' && slot == null) ||
+          (mode === 'queue' && shop.today.state !== 'open') ||
+          chosen.length === 0 ||
+          holding
+        }
+      >
+        {mode === 'queue'
+          ? 'Join the queue'
+          : slot != null
+          ? `Book ${dayLabel(date, shop.today.date)} at ${time12(
+              `${String(Math.floor(slot / 60)).padStart(2, '0')}:${String(slot % 60).padStart(2, '0')}`
+            )}`
+          : 'Pick a time'}
+      </Button>
+    </div>
+  );
+
   return (
-    <Sheet open={open} onClose={handleClose} title={shop.name}>
+    <Sheet open={open} onClose={handleClose} title={shop.name} footer={footerContent}>
       <div className="stack">
         {options.length > 1 && <Segmented value={mode} onChange={(v) => { if (v !== 'slot') releaseHold(); setMode(v); setError(''); }} options={options} />}
 
@@ -317,7 +342,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
                 className={cx('chip', !selectedResource && 'on')}
                 onClick={() => handleResourceChange(null)}
               >
-                ⚡ Anyone (First Available)
+                ⚡ Anyone (Fastest)
               </button>
               {shop.staff.map((st) => (
                 <button
@@ -326,7 +351,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
                   className={cx('chip', selectedResource === st.id && 'on')}
                   onClick={() => handleResourceChange(st.id)}
                 >
-                  {st.name}
+                  ✂️ {st.name}
                 </button>
               ))}
             </div>
@@ -352,7 +377,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
                     className={cx('chip', !selectedResource && 'on')}
                     onClick={() => handleResourceChange(null)}
                   >
-                    🍽️ Any Table (First Available)
+                    🍽️ Any Table (Fastest)
                   </button>
                   {matching.map((t) => (
                     <button
@@ -361,7 +386,7 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
                       className={cx('chip', selectedResource === t.id && 'on')}
                       onClick={() => handleResourceChange(t.id)}
                     >
-                      {t.name} ({t.capacity} seats)
+                      🍽️ {t.name} ({t.capacity} seats)
                     </button>
                   ))}
                 </div>
@@ -471,12 +496,6 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
             </div>
           </div>
         )}
-
-        {error && <p className="err-text center" role="alert">{error}</p>}
-
-        <Button block loading={busy || holding} onClick={book} disabled={(mode === 'slot' && slot == null) || (mode === 'queue' && shop.today.state !== 'open') || chosen.length === 0 || holding}>
-          {mode === 'queue' ? 'Join the queue' : slot != null ? `Book ${dayLabel(date, shop.today.date)} at ${time12(`${String(Math.floor(slot / 60)).padStart(2, '0')}:${String(slot % 60).padStart(2, '0')}`)}` : 'Pick a time'}
-        </Button>
       </div>
     </Sheet>
   );
