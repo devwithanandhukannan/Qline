@@ -227,7 +227,19 @@ function Hours({ shop, reload }) {
 function Staff({ shop, reload }) {
   const confirm = useConfirm();
   const { busy, run } = useSave(reload);
-  const [list, setList] = useState(shop.staff.map((s) => ({ ...s, offDates: [...s.offDates], offDays: [...s.offDays] })));
+  const toWorkingDays = (offDays = []) => {
+    const list = (offDays || []).map(Number);
+    if (list.length >= 7) return [1, 2, 3, 4, 5, 6];
+    return [0, 1, 2, 3, 4, 5, 6].filter((d) => !list.includes(d));
+  };
+  const [list, setList] = useState(
+    (shop.staff || []).map((s) => ({
+      ...s,
+      active: s.active !== false,
+      workingDays: toWorkingDays(s.offDays),
+      offDates: [...(s.offDates || [])],
+    }))
+  );
   const [dateInput, setDateInput] = useState({});
   const upd = (i, patch) => setList(list.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
@@ -242,25 +254,56 @@ function Staff({ shop, reload }) {
     upd(i, { offDates: [...list[i].offDates, d].sort() });
     setDateInput({ ...dateInput, [i]: '' });
   }
-  const save = () => run(() => api('/org/shop/staff', { method: 'PUT', body: { staff: list.map((s) => ({ ...(s.id ? { _id: s.id } : {}), name: s.name.trim() || 'Staff', active: s.active, offDays: s.offDays, offDates: s.offDates.filter((d) => d >= today) })) } }));
+  const save = () =>
+    run(() =>
+      api('/org/shop/staff', {
+        method: 'PUT',
+        body: {
+          staff: list.map((s) => ({
+            ...(s.id || s._id ? { _id: s.id || s._id } : {}),
+            name: s.name.trim() || 'Staff',
+            active: s.active !== false,
+            offDays: [0, 1, 2, 3, 4, 5, 6].filter((d) => !s.workingDays.includes(d)),
+            offDates: (s.offDates || []).filter((d) => d >= today),
+          })),
+        },
+      })
+    );
 
   return (
     <div className="stack">
       <p className="muted small">Each working person is one chair. If someone is off, customers see shorter capacity and longer waits automatically. With nobody listed, Qline assumes one chair.</p>
       {list.length === 0 && <div className="card center muted small">No staff added. Qline assumes 1 chair.</div>}
       {list.map((s, i) => (
-        <div key={s.id || `n${i}`} className="card stack">
+        <div key={s.id || s._id || `n${i}`} className="card stack">
           <div className="row" style={{ gap: 10 }}>
             <input className="input grow" aria-label="Name" value={s.name} onChange={(e) => upd(i, { name: e.target.value })} maxLength={60} placeholder="Name" />
             <Switch checked={s.active} onChange={(v) => upd(i, { active: v })} label="Working" />
             <button className="ico-btn" aria-label="Remove staff" onClick={() => remove(i)}><Trash /></button>
           </div>
           <div className="stack-sm">
-            <span className="small muted">Weekly days off</span>
+            <span className="small muted">Working days</span>
             <div className="hscroll">
-              {SHORT.map((d, k) => (
-                <button key={k} className={cx('chip', s.offDays.includes(k) && 'on')} aria-pressed={s.offDays.includes(k)} onClick={() => upd(i, { offDays: s.offDays.includes(k) ? s.offDays.filter((x) => x !== k) : [...s.offDays, k] })}>{d}</button>
-              ))}
+              {SHORT.map((d, k) => {
+                const isWorking = s.workingDays.includes(k);
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    className={cx('chip', isWorking && 'on')}
+                    aria-pressed={isWorking}
+                    onClick={() =>
+                      upd(i, {
+                        workingDays: isWorking
+                          ? s.workingDays.filter((x) => x !== k)
+                          : [...s.workingDays, k].sort(),
+                      })
+                    }
+                  >
+                    {d}
+                  </button>
+                );
+              })}
             </div>
           </div>
           <div className="stack-sm">
@@ -277,7 +320,7 @@ function Staff({ shop, reload }) {
           </div>
         </div>
       ))}
-      <Button variant="secondary" size="sm" onClick={() => setList([...list, { name: '', active: true, offDays: [], offDates: [] }])} style={{ alignSelf: 'flex-start' }}><Plus width="16" height="16" /> Add staff</Button>
+      <Button variant="secondary" size="sm" onClick={() => setList([...list, { name: '', active: true, workingDays: [1, 2, 3, 4, 5, 6], offDates: [] }])} style={{ alignSelf: 'flex-start' }}><Plus width="16" height="16" /> Add staff</Button>
       <Button block loading={busy} onClick={save}>Save staff</Button>
     </div>
   );

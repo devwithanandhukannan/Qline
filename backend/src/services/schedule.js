@@ -21,14 +21,22 @@ export function resolveDay(shop, dateStr) {
 
 // How many chairs/barbers/tables are working on a date. No staff/tables configured = 1.
 export function capacityOn(shop, dateStr) {
-  if (shop.category === 'cafe' && shop.tables?.length) {
-    const activeTables = shop.tables.filter((t) => t.active);
+  if ((shop.category === 'cafe' || shop.settings?.allowTableSelection) && (shop.tables || []).length > 0) {
+    const activeTables = (shop.tables || []).filter((t) => t.active !== false);
     return Math.max(1, activeTables.length);
   }
   const staff = shop.staff || [];
   if (staff.length === 0) return 1;
   const dow = weekdayOf(dateStr);
-  return staff.filter((s) => s.active && !(s.offDays || []).includes(dow) && !(s.offDates || []).includes(dateStr)).length;
+  const working = staff.filter((s) => {
+    if (s.active === false) return false;
+    const offDays = (s.offDays || []).map(Number);
+    if (offDays.length >= 7) return true;
+    if (offDays.includes(dow)) return false;
+    if ((s.offDates || []).includes(dateStr)) return false;
+    return true;
+  });
+  return working.length;
 }
 
 // Is the shop taking people right now, and until when?
@@ -92,16 +100,36 @@ export function buildSlots(
   let cap = capacityOn(shop, dateStr);
 
   if (resourceId) {
-    cap = 1;
+    const st = (shop.staff || []).find((s) => String(s._id || s.id) === String(resourceId));
+    if (st) {
+      const dow = weekdayOf(dateStr);
+      const offDays = (st.offDays || []).map(Number);
+      const isOff = st.active === false || (offDays.length < 7 && offDays.includes(dow)) || (st.offDates || []).includes(dateStr);
+      if (isOff) {
+        return { open: false, slots: [], reason: `${st.name} is off on this day` };
+      }
+      cap = 1;
+    } else {
+      const tb = (shop.tables || []).find((t) => String(t._id || t.id) === String(resourceId));
+      if (tb) {
+        if (tb.active === false || tb.capacity < partySize) {
+          return { open: false, slots: [], reason: `${tb.name} is not available for ${partySize} people` };
+        }
+        cap = 1;
+      } else {
+        cap = 1;
+      }
+    }
   } else if ((shop.category === 'cafe' || shop.settings?.allowTableSelection) && (shop.tables || []).length > 0) {
-    const eligibleTables = shop.tables.filter((t) => t.active && t.capacity >= partySize);
+    const eligibleTables = (shop.tables || []).filter((t) => t.active !== false && t.capacity >= partySize);
     if (eligibleTables.length === 0) {
       return { open: false, slots: [], reason: `No tables available that can seat ${partySize} people.` };
     }
     cap = eligibleTables.length;
   }
 
-  if (!day.open || cap === 0) return { open: false, slots: [], reason: day.note || 'Closed on this day' };
+  if (!day.open) return { open: false, slots: [], reason: day.note || 'Closed on this day' };
+  if (cap === 0) return { open: false, slots: [], reason: 'No staff available on this day' };
 
   let active = [
     ...bookings.filter((b) => b.type === 'slot' && ['waiting', 'serving', 'done'].includes(b.status)),
