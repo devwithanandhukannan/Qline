@@ -16,6 +16,7 @@ import { buildReport, buildCustomers } from '../services/reports.js';
 import { firstName } from '../services/present.js';
 import { notifyBookingStatus, notifyQueueTurnUpdates, notifyShopDelay } from '../services/webPush.js';
 import { withDistributedLock } from '../utils/lock.js';
+import { makeGuestToken } from './bookings.js';
 
 const r = Router();
 r.use((req, res, next) => requireAuth('owner')(req, res, next));
@@ -173,7 +174,23 @@ r.post('/shop/overrides', withShop, validate({ body: D.overrideDto }), async (re
   const rest = req.shop.overrides.filter((x) => x.date !== o.date);
   req.shop.overrides = [...rest, { date: o.date, closed: o.closed, intervals: o.closed ? [] : o.intervals, note: o.note }];
   await req.shop.save();
-  res.json({ shop: presentOwnerShop(req.shop) });
+
+  let affectedCount = 0;
+  if (o.closed) {
+    const affected = await Booking.find({ shop: req.shop._id, date: o.date, status: { $in: ['waiting', 'serving'] } });
+    affectedCount = affected.length;
+    if (o.cancelAffected && affectedCount > 0) {
+      await Booking.updateMany(
+        { shop: req.shop._id, date: o.date, status: { $in: ['waiting', 'serving'] } },
+        { $set: { status: 'cancelled' } }
+      );
+      for (const b of affected) {
+        notifyBookingStatus(req.shop, b.toObject(), 'cancelled').catch(() => {});
+      }
+    }
+  }
+
+  res.json({ shop: presentOwnerShop(req.shop), affectedCount });
 });
 
 r.delete('/shop/overrides/:date', withShop, validate({ params: D.overrideParam }), async (req, res) => {
@@ -186,15 +203,57 @@ r.delete('/shop/overrides/:date', withShop, validate({ params: D.overrideParam }
 r.get('/queue', withShop, async (req, res) => {
   const now = nowInZone(req.shop.timezone);
   const rows = await Booking.find({ shop: req.shop._id, date: now.date }).sort({ token: 1 }).lean();
-  const orderOf = (x) => x.queueOrder ?? x.token * 100;
-  rows.sort((a, b) => orderOf(a) - orderOf(b) || a.token - b.token);
+  const nowMin = now.minutes;
+  const graceMin = req.shop.settings.graceMin || 5;
+
+  // Annotate late status for grace time enforcement (B2)
+  for (const b of rows) {
+    if (b.status === 'waiting') {
+      if (b.type === 'slot' && b.slotStart != null && b.slotStart + graceMin < nowMin) {
+        b.isLate = true;
+        b.lateMin = nowMin - b.slotStart;
+      }
+    }
+  }
+
+  // L4: Sort order so currently serving is first, then waiting (walk-ins + current/past slots by queueOrder/slotStart), then future slots
+  const orderScore = (x) => {
+    if (x.status === 'serving') return -100000;
+    if (x.type === 'slot') {
+      if (x.slotStart <= nowMin + 15) return x.slotStart * 10;
+      return 100000 + x.slotStart * 10;
+    }
+    return x.queueOrder ?? x.token * 100;
+  };
+  rows.sort((a, b) => orderScore(a) - orderScore(b) || a.token - b.token);
+
+  const isDelayToday = !req.shop.settings.delayDate || req.shop.settings.delayDate === now.date;
+  const activeDelayMin = isDelayToday ? (req.shop.settings.delayMin || 0) : 0;
+  const activeDelayNote = isDelayToday ? (req.shop.settings.delayNote || '') : '';
+
   const est = estimateQueue(req.shop, rows.filter((b) => ['waiting', 'serving'].includes(b.status)), now);
   const st = openStatus(req.shop, now);
   res.json({
     date: now.date,
-    status: { state: st.state, closesAt: st.closesAt != null ? minToHHMM(st.closesAt) : null, capacity: capacityOn(req.shop, now.date), note: resolveDay(req.shop, now.date).note },
-    settings: { queuePaused: req.shop.settings.queuePaused, delayMin: req.shop.settings.delayMin, delayNote: req.shop.settings.delayNote, graceMin: req.shop.settings.graceMin },
-    summary: { waiting: rows.filter((b) => b.status === 'waiting').length, serving: rows.filter((b) => b.status === 'serving').length, done: rows.filter((b) => b.status === 'done').length, waitMin: est.waitMin },
+    status: {
+      state: st.state,
+      closesAt: st.closesAt != null ? minToHHMM(st.closesAt) : null,
+      opensAt: (st.state === 'later' || st.state === 'break') ? minToHHMM(st.opensAtMin) : null,
+      capacity: capacityOn(req.shop, now.date),
+      note: resolveDay(req.shop, now.date).note,
+    },
+    settings: {
+      queuePaused: req.shop.settings.queuePaused,
+      delayMin: activeDelayMin,
+      delayNote: activeDelayNote,
+      graceMin: req.shop.settings.graceMin,
+    },
+    summary: {
+      waiting: rows.filter((b) => b.status === 'waiting').length,
+      serving: rows.filter((b) => b.status === 'serving').length,
+      done: rows.filter((b) => b.status === 'done').length,
+      waitMin: est.waitMin,
+    },
     bookings: await rowsFor(rows),
   });
 });
@@ -206,18 +265,85 @@ r.post('/queue/pause', withShop, requireActiveShop, validate({ body: D.pauseDto 
 });
 
 r.post('/queue/delay', withShop, requireActiveShop, validate({ body: D.delayDto }), async (req, res) => {
+  const now = nowInZone(req.shop.timezone);
   req.shop.settings.delayMin = req.valid.body.delayMin;
   req.shop.settings.delayNote = req.valid.body.delayMin ? req.valid.body.note : '';
+  req.shop.settings.delayDate = req.valid.body.delayMin > 0 ? now.date : null;
   await req.shop.save();
   if (req.shop.settings.delayMin > 0) {
-    notifyShopDelay(req.shop, nowInZone(req.shop.timezone).date, req.shop.settings.delayMin, req.shop.settings.delayNote).catch(() => {});
+    notifyShopDelay(req.shop, now.date, req.shop.settings.delayMin, req.shop.settings.delayNote).catch(() => {});
   }
-  res.json({ ok: true });
+  res.json({ ok: true, delayMin: req.shop.settings.delayMin, delayNote: req.shop.settings.delayNote });
+});
+
+r.post('/queue/next', withShop, requireActiveShop, validate({ body: D.nextDto }), async (req, res) => {
+  const now = nowInZone(req.shop.timezone);
+  const resourceId = req.valid.body.resourceId;
+
+  const out = await withDistributedLock([`shop-act:${req.shop._id}:${now.date}`], async () => {
+    // 1. Finish currently serving customer for this chair/resource (if any)
+    const servingFilter = {
+      shop: req.shop._id,
+      date: now.date,
+      status: 'serving',
+      ...(resourceId ? { resourceId } : {}),
+    };
+    const currentServing = await Booking.findOne(servingFilter).sort({ startedAt: 1 });
+    if (currentServing) {
+      currentServing.status = 'done';
+      currentServing.completedAt = new Date();
+      await currentServing.save();
+      notifyBookingStatus(req.shop, currentServing.toObject(), 'done').catch(() => {});
+    }
+
+    // 2. Find next waiting customer
+    const orderScore = (x) => {
+      if (x.type === 'slot') {
+        if (x.slotStart <= now.minutes + 15) return x.slotStart * 10;
+        return 100000 + x.slotStart * 10;
+      }
+      return x.queueOrder ?? x.token * 100;
+    };
+
+    const waitingFilter = {
+      shop: req.shop._id,
+      date: now.date,
+      status: 'waiting',
+      ...(resourceId ? { $or: [{ resourceId }, { resourceId: null }] } : {}),
+    };
+    const waitingList = await Booking.find(waitingFilter).lean();
+    waitingList.sort((a, b) => orderScore(a) - orderScore(b) || a.token - b.token);
+
+    let nextCustomer = null;
+    if (waitingList[0]) {
+      nextCustomer = await Booking.findById(waitingList[0]._id);
+      if (nextCustomer) {
+        nextCustomer.status = 'serving';
+        nextCustomer.startedAt = new Date();
+        if (resourceId && !nextCustomer.resourceId) {
+          nextCustomer.resourceId = resourceId;
+        }
+        await nextCustomer.save();
+        notifyBookingStatus(req.shop, nextCustomer.toObject(), 'start').catch(() => {});
+        notifyQueueTurnUpdates(req.shop, now.date).catch(() => {});
+      }
+    }
+
+    return {
+      done: currentServing ? currentServing.toObject() : null,
+      serving: nextCustomer ? nextCustomer.toObject() : null,
+    };
+  });
+
+  res.json({ ok: true, ...out });
 });
 
 r.post('/bookings/:id/action', withShop, validate({ params: idParam, body: D.actionDto }), async (req, res) => {
   const { action } = req.valid.body;
-  const out = await withDistributedLock(`booking-act:${req.valid.params.id}`, async () => {
+  const bInitial = await Booking.findOne({ _id: req.valid.params.id, shop: req.shop._id }).select('date').lean();
+  if (!bInitial) throw notFound('Booking not found');
+  const dateKey = bInitial.date || 'today';
+  const out = await withDistributedLock([`booking-act:${req.valid.params.id}`, `shop-act:${req.shop._id}:${dateKey}`], async () => {
     const b = await Booking.findOne({ _id: req.valid.params.id, shop: req.shop._id });
     if (!b) throw notFound('Booking not found');
     const ok = {
@@ -325,7 +451,13 @@ r.post('/walkin', withShop, requireActiveShop, validate({ body: D.walkinDto }), 
       durationMin: chosen.reduce((a, s) => a + s.durationMin, 0) * partySize,
     });
   });
-  res.status(201).json({ id: String(b._id), token: b.token });
+  const guestToken = makeGuestToken(b._id);
+  res.status(201).json({
+    id: String(b._id),
+    token: b.token,
+    guestToken,
+    ticketPath: `/b/${b._id}?guest=${guestToken}`,
+  });
 });
 
 // ---------- calendar and reports ----------
@@ -379,11 +511,66 @@ r.get('/reports', withShop, validate({ query: D.reportQuery }), async (req, res)
 
 r.get('/customers', withShop, validate({ query: D.customersQuery }), async (req, res) => {
   const { q, page, limit } = req.valid.query;
-  const bookings = await Booking.find({ shop: req.shop._id, customer: { $ne: null } }).select('customer date status services').lean();
-  const ids = [...new Set(bookings.map((b) => String(b.customer)))];
-  const users = new Map((await User.find({ _id: { $in: ids } }).select('name email phone').lean()).map((u) => [String(u._id), u]));
-  const all = buildCustomers(bookings, users, q?.toLowerCase());
+  const agg = await Booking.aggregate([
+    { $match: { shop: req.shop._id, customer: { $ne: null } } },
+    {
+      $group: {
+        _id: '$customer',
+        bookings: { $sum: 1 },
+        visits: { $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] } },
+        noShows: { $sum: { $cond: [{ $eq: ['$status', 'no_show'] }, 1, 0] } },
+        firstDate: { $min: '$date' },
+        lastDate: { $max: '$date' },
+        spent: {
+          $sum: {
+            $cond: [
+              { $eq: ['$status', 'done'] },
+              { $sum: '$services.price' },
+              0,
+            ],
+          },
+        },
+      },
+    },
+    { $sort: { lastDate: -1 } },
+  ]);
+
+  const customerIds = agg.map((a) => a._id);
+  const userQuery = { _id: { $in: customerIds } };
+  if (q && q.trim()) {
+    const regex = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    userQuery.$or = [{ name: regex }, { email: regex }, { phone: regex }];
+  }
+  const users = await User.find(userQuery).select('name email phone noShowCount').lean();
+  const userMap = new Map(users.map((u) => [String(u._id), u]));
+
+  const all = [];
+  for (const a of agg) {
+    const u = userMap.get(String(a._id));
+    if (!u) continue;
+    all.push({
+      id: String(u._id),
+      name: u.name || 'Customer',
+      email: u.email || '',
+      phone: u.phone || '',
+      visits: a.visits,
+      bookings: a.bookings,
+      noShows: u.noShowCount ?? a.noShows,
+      firstDate: a.firstDate,
+      lastDate: a.lastDate,
+      spent: a.spent || 0,
+    });
+  }
+
   res.json({ total: all.length, customers: all.slice((page - 1) * limit, page * limit) });
+});
+
+r.post('/customers/:id/reset-no-shows', withShop, validate({ params: idParam }), async (req, res) => {
+  const customer = await User.findById(req.valid.params.id);
+  if (!customer) throw notFound('Customer not found');
+  customer.noShowCount = 0;
+  await customer.save();
+  res.json({ ok: true, message: `Reset no-shows for ${customer.name || 'customer'}` });
 });
 
 r.get('/reviews', withShop, async (req, res) => {

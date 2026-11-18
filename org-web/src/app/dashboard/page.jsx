@@ -56,6 +56,28 @@ function Row({ b, onAction, busy, busyResourceIds, shopName }) {
           {!live && <span className={cx('tag', b.status === 'no_show' && 'bad')}>{STATUS_TEXT[b.status]}</span>}
         </div>
         <div className="small muted">{b.services.join(', ')} · {mins(b.durationMin)}</div>
+        {b.isLate && live && (
+          <div
+            className="row between wrap"
+            style={{
+              padding: '8px 12px',
+              borderRadius: 8,
+              background: 'rgba(217, 45, 32, 0.12)',
+              border: '1px solid rgba(217, 45, 32, 0.35)',
+              margin: '6px 0 2px',
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#d92d20' }}>
+              ⚠️ Customer is {b.lateMin} min late (grace time passed)
+            </span>
+            <div className="row" style={{ gap: 6 }}>
+              <Button size="sm" variant="secondary" onClick={() => onAction(b, 'no_show')}>
+                Mark No-Show
+              </Button>
+            </div>
+          </div>
+        )}
         {b.phone && (
           <div className="row wrap" style={{ gap: 10, alignItems: 'center' }}>
             <a href={`tel:${b.phone}`} className="small row" style={{ gap: 6, width: 'fit-content' }}>
@@ -146,6 +168,26 @@ function Dashboard() {
     setBusy(b.id + action);
     try {
       await api(`/org/bookings/${b.id}/action`, { method: 'POST', body: { action } });
+      await load();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function callNext() {
+    setBusy('next');
+    try {
+      const res = await api('/org/queue/next', {
+        method: 'POST',
+        body: { resourceId: filterResource !== 'all' ? filterResource : undefined },
+      });
+      if (res.serving) {
+        toast.show(`Now serving Token #${res.serving.token}`);
+      } else {
+        toast.show('No waiting customers');
+      }
       await load();
     } catch (e) {
       toast.error(e.message);
@@ -291,6 +333,38 @@ function Dashboard() {
             })}
           </div>
         )}
+        {displayLive.some((b) => b.status === 'waiting') && (
+          <div
+            className="card row between wrap enter"
+            style={{
+              background: 'var(--inv-bg)',
+              color: 'var(--inv-fg)',
+              padding: '12px 18px',
+              borderRadius: 12,
+              alignItems: 'center',
+              marginBottom: 8,
+            }}
+          >
+            <div className="stack-sm" style={{ gap: 2 }}>
+              <b style={{ fontSize: 16 }}>Call Next Customer</b>
+              <span className="small" style={{ opacity: 0.8 }}>
+                {displayLive.some((b) => b.status === 'serving') ? 'Finish current customer and call the next in line.' : 'Call the next customer in the queue.'}
+              </span>
+            </div>
+            <Button
+              onClick={callNext}
+              loading={busy === 'next'}
+              style={{
+                background: 'var(--accent, #ffffff)',
+                color: '#111111',
+                fontWeight: 700,
+                border: 'none',
+              }}
+            >
+              <Play width="16" height="16" /> Next in line
+            </Button>
+          </div>
+        )}
         {displayLive.length === 0 ? (
           <div className="list">
             <Empty icon={<Users />} title={filterResource === 'all' ? 'Nobody waiting' : 'Nobody waiting here'} action={<Link href="/settings#qr" className="btn secondary sm"><Qr width="16" height="16" /> Show my QR code</Link>}>
@@ -334,6 +408,7 @@ function WalkinSheet({ open, onClose, shop, onDone }) {
   const [ids, setIds] = useState([]);
   const [err, setErr] = useState({});
   const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState(null);
   const services = (shop?.services || []).filter((s) => s.active);
   const activeStaff = (shop?.staff || []).filter((s) => s.active);
   const activeTables = (shop?.tables || []).filter((t) => t.active);
@@ -345,6 +420,7 @@ function WalkinSheet({ open, onClose, shop, onDone }) {
       setPartySize('1');
       setResourceId(null);
       setErr({});
+      setCreated(null);
       setIds(services.length === 1 ? [services[0].id] : []);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -366,14 +442,49 @@ function WalkinSheet({ open, onClose, shop, onDone }) {
           resourceId: resourceId || undefined,
         },
       });
+      const customerBaseUrl = typeof window !== 'undefined' ? window.location.origin.replace(':3001', ':3000') : '';
+      const fullUrl = customerBaseUrl + (r.ticketPath || `/b/${r.id}`);
+      setCreated({ token: r.token, name: finalName, ticketUrl: fullUrl });
       toast.show(`Added as token ${r.token}`);
-      onDone();
     } catch (e2) {
       setErr(e2 instanceof ApiError ? e2.fields : {});
       toast.error(e2.message);
     } finally {
       setBusy(false);
     }
+  }
+
+  if (created) {
+    return (
+      <Sheet open={open} onClose={() => { setCreated(null); onDone(); }} title="Walk-in Added">
+        <div className="card center stack" style={{ padding: '24px 16px', textAlign: 'center' }}>
+          <div className="token" style={{ width: 68, height: 68, fontSize: 26, margin: '0 auto' }}>
+            #{created.token}
+          </div>
+          <b style={{ fontSize: 18 }}>Token #{created.token} for {created.name}</b>
+          <p className="muted small">
+            The customer can track their position live on their own phone without an account.
+          </p>
+          <div className="row wrap center" style={{ gap: 10, marginTop: 8, justifyContent: 'center' }}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                if (navigator?.clipboard) {
+                  navigator.clipboard.writeText(created.ticketUrl);
+                  toast.show('Copied live ticket link!');
+                }
+              }}
+            >
+              Copy Ticket Link
+            </Button>
+            <Button type="button" onClick={() => { setCreated(null); onDone(); }}>
+              Done
+            </Button>
+          </div>
+        </div>
+      </Sheet>
+    );
   }
 
   return (

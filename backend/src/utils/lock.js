@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { Lock } from '../models/Lock.js';
+import { conflict } from './errors.js';
 
 const memQueues = new Map();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -54,7 +55,7 @@ async function acquireDbLock(key, ttlMs = 8000, timeoutMs = 5000) {
     }
     await sleep(15 + Math.floor(Math.random() * 25));
   }
-  throw new Error(`Could not acquire distributed lock for ${key}`);
+  throw conflict('The booking system is currently busy. Please try again in a moment.', 'lock_busy');
 }
 
 async function releaseDbLock(key, token) {

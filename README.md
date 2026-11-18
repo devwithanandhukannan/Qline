@@ -7,6 +7,7 @@ Queue and booking for local shops (barbers, salons, cafes). Free to run.
 | `backend/` | Node.js + Express API, MongoDB | Render (free web service) + MongoDB Atlas (free M0) |
 | `customer-web/` | Customer PWA + landing page (Next.js) | Vercel Hobby |
 | `org-web/` | Shop-owner PWA + landing page (Next.js) | Vercel Hobby |
+| `admin-web/` | Platform super-admin portal (Next.js) | Vercel Hobby |
 
 Customers scan a QR code or search for a shop, join the live queue or book a slot, watch their turn, and rate the visit.
 Owners set hours, staff time off and per-day overrides, run the live queue, and see calendar, reports and graphs.
@@ -93,4 +94,5 @@ Secrets live only in `.env` files or the host dashboards. Nothing secret is in t
 
 - Shop hours are interpreted in the shop's time zone (`DEFAULT_TIMEZONE`, default `Asia/Kolkata`).
 - Vercel's free Hobby plan is for personal, non-commercial use. If you plan to charge shops, check Vercel's terms or host the two Next.js apps elsewhere.
-- Web push is not included: the "alert me when I'm next" switch works while the ticket page is open.
+- Web push notifications: Standard W3C Web Push with VAPID signatures and RFC 8291 aes128gcm payload encryption alerts customers in background when their turn is coming up ("You're next in line") and when their chair is ready.
+- Multi-resource queueing: Dynamic resource assignment (barbers, stylists, cafe tables) with slot-queue mutual concurrency awareness and auto-grace enforcement.

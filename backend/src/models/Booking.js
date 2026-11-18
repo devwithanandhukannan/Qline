@@ -49,6 +49,8 @@ const bookingSchema = new mongoose.Schema(
     },
     startedAt: Date,
     completedAt: Date,
+    lateCancelled: { type: Boolean, default: false },
+    cancelledAt: { type: Date, default: null },
     reviewed: { type: Boolean, default: false },
   },
   { timestamps: true }

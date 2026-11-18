@@ -87,5 +87,43 @@ test('queue auto-cutoff, max length, closed and paused', () => {
   assert.equal(late.ok, false, 'cannot finish before lunch closes at 13:00');
   assert.equal(queueDecision(shop(), [], 20, { date: SUN, minutes: 600 }).ok, false, 'closed');
   assert.equal(queueDecision(shop({ settings: { ...shop().settings, queuePaused: true } }), [], 20, { date: MON, minutes: 600 }).ok, false);
-  assert.equal(openStatus(shop(), { date: MON, minutes: 13 * 60 + 30 }).state, 'later');
+  assert.equal(openStatus(shop(), { date: MON, minutes: 13 * 60 + 30 }).state, 'break');
+});
+
+test('queue ETA accounts for upcoming slot bookings during wait window (B1/L1)', () => {
+  const now = { date: MON, minutes: 10 * 60 };
+  const bookings = [
+    { type: 'queue', status: 'waiting', durationMin: 20, token: 1 },
+    // Slot booked at 10:20 (within the wait window) for 30 minutes
+    { type: 'slot', status: 'waiting', slotStart: 10 * 60 + 20, durationMin: 30, token: 2 },
+  ];
+  // 1 chair: queue (20) + slot (30) = 50 min wait
+  assert.equal(estimateQueue(shop(), bookings, now).waitMin, 50);
+});
+
+test('buildSlots accounts for serving queue customers and early done slots (L1/L6)', () => {
+  const now = { date: MON, minutes: 9 * 60 + 40 };
+  // A walk-in started at 09:50 for 30 min (serving until 10:20)
+  const startedAt = new Date();
+  startedAt.setHours(9, 50, 0, 0);
+  const queueServing = [
+    { type: 'queue', status: 'serving', startedAt, durationMin: 30 },
+  ];
+  const r = buildSlots(shop(), MON, queueServing, 30, now);
+  // 10:00 slot overlaps with 09:50-10:20 walk-in, so free should be false
+  assert.equal(r.slots.find((x) => x.time === '10:00').free, false);
+  // 10:30 slot starts after walk-in finish, so free should be true
+  assert.equal(r.slots.find((x) => x.time === '10:30').free, true);
+
+  // L6: slot finished early at 10:15 instead of 10:45
+  const slotStarted = new Date();
+  slotStarted.setHours(10, 0, 0, 0);
+  const slotCompleted = new Date();
+  slotCompleted.setHours(10, 15, 0, 0);
+  const slotDoneEarly = [
+    { type: 'slot', status: 'done', slotStart: 10 * 60, durationMin: 45, startedAt: slotStarted, completedAt: slotCompleted },
+  ];
+  const r2 = buildSlots(shop(), MON, slotDoneEarly, 30, now);
+  // Because it was marked done at 10:15, 10:30 slot should be free!
+  assert.equal(r2.slots.find((x) => x.time === '10:30').free, true);
 });

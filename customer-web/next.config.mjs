@@ -21,7 +21,7 @@ const csp = [
 export default {
   reactStrictMode: true,
   poweredByHeader: false,
-  allowedDevOrigins:['192.168.1.6'],
+  ...(process.env.ALLOWED_DEV_ORIGINS ? { allowedDevOrigins: process.env.ALLOWED_DEV_ORIGINS.split(',').map((s) => s.trim()) } : {}),
   // The browser only ever talks to this app's own domain; /api is proxied to the backend.
   // That keeps auth cookies first-party (works on Safari) and means no CORS or secrets in the browser.
   async rewrites() {

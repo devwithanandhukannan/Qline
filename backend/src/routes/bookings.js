@@ -177,20 +177,58 @@ r.post('/', validate({ body: createBookingDto }), async (req, res) => {
         .select('shop date type slotStart forName')
         .lean();
       if (mine.length >= MAX_ACTIVE) throw conflict(`You already have ${MAX_ACTIVE} active bookings. Finish or cancel one first.`, 'too_many_active');
-      if (type === 'queue' && mine.some((m) => String(m.shop) === String(shop._id) && m.date === date && m.type === 'queue' && sameRecipient(m))) {
-        throw conflict(cleanFor ? `You already have a queue booking for ${cleanFor}.` : 'You are already in this queue.', 'already_queued');
+      if (type === 'queue') {
+        const activeQueue = mine.find((m) => m.type === 'queue');
+        if (activeQueue) {
+          throw conflict(
+            String(activeQueue.shop) === String(shop._id)
+              ? (cleanFor ? `You already have a queue booking for ${cleanFor}.` : 'You are already in this queue.')
+              : 'You already have an active queue ticket at another shop today. You can only hold one live queue ticket at a time.',
+            'already_queued'
+          );
+        }
       }
-      if (type === 'slot' && mine.some((m) => String(m.shop) === String(shop._id) && m.date === date && m.slotStart === slotStart && sameRecipient(m))) {
-        throw conflict(cleanFor ? `You already booked this slot for ${cleanFor}.` : 'You already booked this slot.', 'already_booked');
+      if (type === 'slot') {
+        if ((user.noShowCount || 0) >= 3) {
+          throw conflict(
+            'Due to 3 or more missed appointments, advance slot booking is disabled for your account. You can still join the live walk-in queue.',
+            'slot_booking_restricted'
+          );
+        }
+        if (mine.some((m) => String(m.shop) === String(shop._id) && m.date === date && m.slotStart === slotStart && sameRecipient(m))) {
+          throw conflict(cleanFor ? `You already booked this slot for ${cleanFor}.` : 'You already booked this slot.', 'already_booked');
+        }
       }
-    } else if (cleanGuestPhone) {
-      const activeForPhone = await Booking.countDocuments({
-        shop: shop._id,
-        date,
-        guestPhone: cleanGuestPhone,
-        status: { $in: ['waiting', 'serving'] },
-      });
-      if (activeForPhone >= 3) throw conflict('You already have active bookings for this phone number today.', 'already_queued');
+    } else {
+      if (type === 'queue') {
+        const guestCriteria = [];
+        if (cleanGuestPhone) guestCriteria.push({ guestPhone: cleanGuestPhone });
+        if (req.ip) guestCriteria.push({ guestId: req.ip });
+        if (guestCriteria.length > 0) {
+          const activeGuestQueue = await Booking.findOne({
+            $or: guestCriteria,
+            type: 'queue',
+            date,
+            status: { $in: ['waiting', 'serving'] },
+          }).lean();
+          if (activeGuestQueue) {
+            throw conflict(
+              String(activeGuestQueue.shop) === String(shop._id)
+                ? 'You already have an active queue ticket here.'
+                : 'You already have an active queue ticket at another shop today. You can only hold one live queue ticket at a time.',
+              'already_queued'
+            );
+          }
+        }
+      } else if (cleanGuestPhone) {
+        const activeForPhone = await Booking.countDocuments({
+          shop: shop._id,
+          date,
+          guestPhone: cleanGuestPhone,
+          status: { $in: ['waiting', 'serving'] },
+        });
+        if (activeForPhone >= 3) throw conflict('You already have active bookings for this phone number today.', 'already_queued');
+      }
     }
 
     const dayBookings = await Booking.find({ shop: shop._id, date, status: { $in: ['waiting', 'serving', 'done'] } })
@@ -309,15 +347,18 @@ r.get('/mine', validate({ query: mineQuery }), async (req, res) => {
 
 async function hydrateBooking(b, shop) {
   let live = null;
+  const now = nowInZone(shop.timezone);
   if (b.type === 'queue' && ['waiting', 'serving'].includes(b.status)) {
-    const todays = await Booking.find({ shop: shop._id, date: b.date, type: 'queue', status: { $in: ['waiting', 'serving'] } })
-      .select('type status durationMin startedAt token queueOrder steppedBackCount resourceId')
+    const todays = await Booking.find({ shop: shop._id, date: b.date, status: { $in: ['waiting', 'serving'] } })
+      .select('type status durationMin startedAt token queueOrder steppedBackCount resourceId slotStart')
       .lean();
-    live = positionOf(b, { settings: shop.settings, _cap: capacityOn(shop, b.date) }, todays);
+    live = positionOf(b, { settings: shop.settings, _cap: capacityOn(shop, b.date) }, todays, now);
     const nowServing = todays.filter((x) => x.status === 'serving').map((x) => x.token);
     live = { ...live, nowServing };
   }
-  const st = openStatus(shop);
+  const st = openStatus(shop, now);
+  const isDelayToday = !shop.settings.delayDate || shop.settings.delayDate === now.date;
+  const activeDelay = isDelayToday && shop.settings.delayMin ? { min: shop.settings.delayMin, note: shop.settings.delayNote } : null;
   return presentBooking(b, {
     live,
     shop: {
@@ -332,7 +373,7 @@ async function hydrateBooking(b, shop) {
       lng: shop.lng,
     },
     graceMin: shop.settings.graceMin,
-    delay: shop.settings.delayMin ? { min: shop.settings.delayMin, note: shop.settings.delayNote } : null,
+    delay: activeDelay,
     shopState: st.state,
   });
 }
@@ -350,13 +391,28 @@ r.post('/:id/cancel', validate({ params: idParam }), async (req, res) => {
   if (!existing || !verifyGuestAccess(req, existing)) throw notFound('Booking not found');
   if (existing.status !== 'waiting') throw conflict('This booking can no longer be cancelled.');
 
+  const shop = await Shop.findById(existing.shop).lean();
+  const now = nowInZone(shop?.timezone || 'Asia/Kolkata');
+  const cutoffMin = shop?.settings?.cancelCutoffMin ?? 60;
+  let isLate = false;
+  if (existing.type === 'slot' && existing.date === now.date && existing.slotStart != null) {
+    if (existing.slotStart - now.minutes < cutoffMin) {
+      isLate = true;
+    }
+  }
+
   const updated = await Booking.findByIdAndUpdate(
     existing._id,
-    { $set: { status: 'cancelled' } },
+    {
+      $set: {
+        status: 'cancelled',
+        lateCancelled: isLate,
+        cancelledAt: new Date(),
+      },
+    },
     { returnDocument: 'after' }
   );
   if (updated && updated.type === 'queue') {
-    const shop = await Shop.findById(updated.shop).lean();
     if (shop) notifyQueueTurnUpdates(shop, updated.date).catch(() => {});
   }
   res.json({ booking: presentBooking(updated) });
@@ -449,11 +505,18 @@ r.post('/:id/review', validate({ params: idParam, body: reviewDto }), async (req
     await Booking.updateOne({ _id: b._id }, { $set: { reviewed: false } }).catch(() => {});
     throw err;
   }
-  await withMemoryLock(`shop-rate:${b.shop}`, async () => {
+  await withDistributedLock(`shop-rate:${b.shop}`, async () => {
     const shop = await Shop.findById(b.shop);
-    shop.ratingAvg = (shop.ratingAvg * shop.ratingCount + stars) / (shop.ratingCount + 1);
-    shop.ratingCount += 1;
-    await shop.save();
+    if (shop) {
+      const currentCount = shop.ratingCount || 0;
+      const currentSum = shop.ratingSum || (shop.ratingAvg * currentCount);
+      const newCount = currentCount + 1;
+      const newSum = currentSum + stars;
+      shop.ratingCount = newCount;
+      shop.ratingSum = newSum;
+      shop.ratingAvg = Math.round((newSum / newCount) * 10) / 10;
+      await shop.save();
+    }
   });
   res.status(201).json({ ok: true });
 });

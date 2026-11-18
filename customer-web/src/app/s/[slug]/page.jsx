@@ -182,7 +182,7 @@ export default function ShopPage() {
           <div className="row between">
             <span className="row" style={{ gap: 8, fontWeight: 600 }}>
               <span className={cx('dot', st.tone, st.tone === 'ok' && 'pulse')} />
-              {shop.today.state === 'open' ? 'Open now' : shop.today.state === 'later' ? 'Opens later' : 'Closed'}
+              {shop.today.state === 'open' ? 'Open now' : shop.today.state === 'break' ? 'On break' : shop.today.state === 'later' ? 'Opens later' : 'Closed'}
             </span>
             <span className="small muted">
               {shop.today.hours.length > 0 ? shop.today.hours.map((h) => `${time12(h.start)} to ${time12(h.end)}`).join(' · ') : shop.today.note}

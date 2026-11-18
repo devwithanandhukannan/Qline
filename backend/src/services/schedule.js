@@ -47,7 +47,16 @@ export function openStatus(shop, now = nowInZone(shop.timezone)) {
   const current = day.intervals.find((i) => now.minutes >= i.start && now.minutes < i.end);
   if (current) return { state: 'open', closesAt: current.end, capacity: cap, note: day.note };
   const upcoming = day.intervals.find((i) => i.start > now.minutes);
-  if (upcoming) return { state: 'later', opensAtMin: upcoming.start, capacity: cap, note: day.note };
+  if (upcoming) {
+    const isBreak = day.intervals.some((i) => i.end <= now.minutes);
+    return {
+      state: isBreak ? 'break' : 'later',
+      opensAtMin: upcoming.start,
+      capacity: cap,
+      note: isBreak ? `On break until ${minToHHMM(upcoming.start)}` : day.note,
+      isBreak,
+    };
+  }
   return { state: 'closed', reason: 'Closed for today', closesAt: null, opensAt: nextOpening(shop, now) };
 }
 
@@ -131,20 +140,54 @@ export function buildSlots(
   if (!day.open) return { open: false, slots: [], reason: day.note || 'Closed on this day' };
   if (cap === 0) return { open: false, slots: [], reason: 'No staff available on this day' };
 
-  let active = [
-    ...bookings.filter((b) => b.type === 'slot' && ['waiting', 'serving', 'done'].includes(b.status)),
-    ...activeHolds,
-  ];
+  const active = [];
+  for (const b of bookings) {
+    if (b.type === 'slot' && ['waiting', 'serving', 'done'].includes(b.status)) {
+      if (b.slotStart == null) continue;
+      let effectiveDuration = b.durationMin;
+      // L6: If marked done early on today, free up the chair after completedAt
+      if (b.status === 'done' && b.completedAt && b.startedAt && diff === 0) {
+        const compD = new Date(b.completedAt);
+        const compMin = compD.getHours() * 60 + compD.getMinutes();
+        if (compMin > b.slotStart && compMin < b.slotStart + b.durationMin) {
+          effectiveDuration = Math.max(1, compMin - b.slotStart);
+        }
+      }
+      active.push({
+        slotStart: b.slotStart,
+        durationMin: effectiveDuration,
+        resourceId: b.resourceId,
+      });
+    } else if (diff === 0 && b.type === 'queue' && b.status === 'serving' && b.startedAt) {
+      // L1: Queue booking currently in the chair blocks the chair during its service window
+      const startD = new Date(b.startedAt);
+      const startMin = startD.getHours() * 60 + startD.getMinutes();
+      active.push({
+        slotStart: startMin,
+        durationMin: b.durationMin,
+        resourceId: b.resourceId,
+      });
+    }
+  }
 
+  for (const h of activeHolds) {
+    active.push({
+      slotStart: h.slotStart,
+      durationMin: h.durationMin,
+      resourceId: h.resourceId,
+    });
+  }
+
+  let filteredActive = active;
   if (resourceId) {
-    active = active.filter((b) => !b.resourceId || String(b.resourceId) === String(resourceId));
+    filteredActive = active.filter((b) => !b.resourceId || String(b.resourceId) === String(resourceId));
   }
 
   const slots = [];
   for (const iv of day.intervals) {
     for (let t = iv.start; t + durationMin <= iv.end; t += slotIntervalMin) {
       if (diff === 0 && t < now.minutes + 5) continue;
-      const taken = peakConcurrent(active, t, durationMin);
+      const taken = peakConcurrent(filteredActive, t, durationMin);
       slots.push({ time: minToHHMM(t), start: t, free: taken < cap, left: Math.max(0, cap - taken) });
     }
   }

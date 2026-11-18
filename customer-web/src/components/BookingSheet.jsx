@@ -451,7 +451,13 @@ export default function BookingSheet({ open, onClose, shop, serviceIds, initialM
           return (
             <div className="card center stack-sm">
               {shop.today.state !== 'open' ? (
-                <p className="muted">{shop.today.state === 'later' ? `The shop opens at ${time12(shop.today.opensAt)}. You can join the queue once it opens.` : 'The shop is closed right now.'}</p>
+                <p className="muted">
+                  {shop.today.state === 'break'
+                    ? `The shop is currently on break until ${time12(shop.today.opensAt)}. You can join the queue once it reopens.`
+                    : shop.today.state === 'later'
+                    ? `The shop opens at ${time12(shop.today.opensAt)}. You can join the queue once it opens.`
+                    : 'The shop is closed right now.'}
+                </p>
               ) : (
                 <>
                   <p className="small muted">

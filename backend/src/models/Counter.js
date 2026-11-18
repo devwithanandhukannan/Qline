@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 const counterSchema = new mongoose.Schema({
   key: { type: String, required: true, unique: true },
   seq: { type: Number, default: 0 },
-  createdAt: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 10 },
+  createdAt: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 120 },
 });
 
 export const Counter = mongoose.model('Counter', counterSchema);

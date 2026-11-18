@@ -20,6 +20,7 @@ export function statusLine(shop) {
     }
     return { tone: 'ok', text: `Open until ${time12(t.closesAt)}` };
   }
+  if (t.state === 'break') return { tone: 'warn', text: `On break · Back at ${time12(t.opensAt)}` };
   if (t.state === 'later') return { tone: 'warn', text: `Opens ${time12(t.opensAt)}` };
   return { tone: 'bad', text: t.note || 'Closed today' };
 }

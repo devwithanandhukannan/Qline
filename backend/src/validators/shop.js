@@ -108,7 +108,13 @@ export const staffDto = z
   .strict();
 
 export const overrideDto = z
-  .object({ date: dateStr, closed: z.boolean(), intervals: intervalsDto.default([]), note: text(140).default('') })
+  .object({
+    date: dateStr,
+    closed: z.boolean(),
+    intervals: intervalsDto.default([]),
+    note: text(140).default(''),
+    cancelAffected: z.boolean().optional(),
+  })
   .strict()
   .refine((o) => o.closed || o.intervals.length > 0, { message: 'Add opening hours or mark the day closed', path: ['intervals'] });
 
@@ -116,6 +122,7 @@ export const overrideParam = z.object({ date: dateStr }).strict();
 
 export const pauseDto = z.object({ paused: z.boolean() }).strict();
 export const delayDto = z.object({ delayMin: z.number().int().min(0).max(240), note: text(140).default('') }).strict();
+export const nextDto = z.object({ resourceId: objectId.nullable().optional() }).strict();
 
 export const actionDto = z
   .object({

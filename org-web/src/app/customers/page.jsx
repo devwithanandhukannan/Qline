@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Button, Empty, Segmented, Sheet, Stars } from '@/components/ui';
+import { Button, Empty, Segmented, Sheet, Stars, useToast } from '@/components/ui';
 import { CustomerListSkeleton, ReviewListSkeleton } from '@/components/Skeletons';
 import { Phone, Search, Star, Users } from '@/components/icons';
 import { api } from '@/lib/api';
@@ -10,6 +10,7 @@ import { ago, longDate, money, shortDate } from '@/lib/format';
 const LIMIT = 20;
 
 function Customers() {
+  const toast = useToast();
   const [q, setQ] = useState('');
   const [rows, setRows] = useState(null);
   const [total, setTotal] = useState(0);
@@ -88,6 +89,24 @@ function Customers() {
               <div className="item"><span className="muted grow">Email</span><b style={{ wordBreak: 'break-all' }}>{open.email || '-'}</b></div>
             </div>
             {open.phone && <a className="btn secondary block" href={`tel:${open.phone}`}><Phone width="18" height="18" /> Call {open.phone}</a>}
+            {open.noShows > 0 && (
+              <Button
+                variant="secondary"
+                block
+                onClick={async () => {
+                  try {
+                    await api(`/org/customers/${open.id}/reset-no-shows`, { method: 'POST' });
+                    setOpen((prev) => ({ ...prev, noShows: 0 }));
+                    setRows((prev) => (prev || []).map((r) => r.id === open.id ? { ...r, noShows: 0 } : r));
+                    toast.show(`Reset no-shows for ${open.name}`);
+                  } catch (e) {
+                    toast.error(e.message);
+                  }
+                }}
+              >
+                Reset No-Shows
+              </Button>
+            )}
           </div>
         )}
       </Sheet>
