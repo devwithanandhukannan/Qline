@@ -63,8 +63,22 @@ function Profile({ shop, reload }) {
       <Input label="Shop name" value={f.name} onChange={set('name')} error={errs.name} maxLength={80} />
       <div className="field">
         <label>Type</label>
-        <div className="hscroll">
-          {CATEGORIES.map((c) => <button type="button" key={c.value} className={cx('chip', f.category === c.value && 'on')} onClick={() => setF({ ...f, category: c.value })}>{c.label}</button>)}
+        <div className="hscroll" role="radiogroup" aria-label="Shop type">
+          {CATEGORIES.map((c) => (
+            <button
+              type="button"
+              key={c.value}
+              role="radio"
+              aria-checked={f.category === c.value}
+              className={cx('chip', f.category === c.value && 'on')}
+              onClick={(e) => {
+                setF({ ...f, category: c.value });
+                e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+              }}
+            >
+              {c.label}
+            </button>
+          ))}
         </div>
       </div>
       <Textarea label="About" value={f.description} onChange={set('description')} error={errs.description} maxLength={400} />
@@ -606,6 +620,10 @@ function Settings() {
 
   useEffect(() => {
     if (window.location.hash === '#qr') document.getElementById('qr')?.scrollIntoView({ block: 'start' });
+    const activeBtn = document.querySelector('.nav-seg button.chip.on');
+    if (activeBtn) {
+      activeBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
   }, [tab]);
 
   const body = {
@@ -620,11 +638,22 @@ function Settings() {
   }[tab];
 
   return (
-    <div className="stack-lg" style={{ maxWidth: 680, margin: '0 auto' }} ref={top}>
+    <div className="stack-lg" style={{ maxWidth: 680, width: '100%', minWidth: 0, margin: '0 auto' }} ref={top}>
       <h1 className="enter no-print">Settings</h1>
       <div className="hscroll nav-seg no-print" role="tablist" aria-label="Settings sections">
         {sections.map(([id, label]) => (
-          <button key={id} role="tab" aria-selected={tab === id} className={cx('chip', tab === id && 'on')} onClick={() => go(id)}>{label}</button>
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            className={cx('chip', tab === id && 'on')}
+            onClick={(e) => {
+              go(id);
+              e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            }}
+          >
+            {label}
+          </button>
         ))}
       </div>
       <section id={tab} className="enter" key={tab} style={{ scrollMarginTop: 70 }}>{body}</section>
