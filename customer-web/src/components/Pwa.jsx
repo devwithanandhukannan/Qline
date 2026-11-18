@@ -20,8 +20,23 @@ export function PwaProvider({ children }) {
   const [installing, setInstalling] = useState(false);
 
   useEffect(() => {
-    if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    if (typeof window !== 'undefined') {
+      const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (isDev) {
+        // In local development, proactively unregister any active service worker and wipe caches
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then((registrations) => {
+            for (const reg of registrations) reg.unregister();
+          }).catch(() => {});
+        }
+        if ('caches' in window) {
+          caches.keys().then((keys) => {
+            for (const key of keys) caches.delete(key);
+          }).catch(() => {});
+        }
+      } else if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      }
     }
     const standalone =
       window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
